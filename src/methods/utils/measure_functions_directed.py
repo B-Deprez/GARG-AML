@@ -68,13 +68,15 @@ def measure_12_function(adj_full, size_0, size_1, size_2):
 
     if total_size_12 > 0:
         rel_12 = total_sum_12/total_size_12
-    else:
+    elif size_2 > 0:
         rel_12 = 1 #Since block only contains sure connections => full sum
+    else:
+        rel_12 = 0 #No connections at all
 
     return rel_12, total_size_12
 
-def measure_20_function(adj_full, size_0, size_2):
-    piece_20 = adj_full[-size_2:, :size_0]
+def measure_20_function(adj_full, size_0, size_1, size_2):
+    piece_20 = adj_full[size_0+size_1:, :size_0]
     total_sum_20 = piece_20.sum()
     total_size_20 = piece_20.size
     reduced_size_20 = total_size_20 - size_2
@@ -86,8 +88,8 @@ def measure_20_function(adj_full, size_0, size_2):
     
     return rel_20, reduced_size_20
 
-def measure_21_function(adj_full, size_0, size_1, size_2):
-    piece_21 = adj_full[-size_2:, size_0:size_0 + size_1]
+def measure_21_function(adj_full, size_0, size_1):
+    piece_21 = adj_full[size_0+size_1:, size_0:size_0 + size_1]
     total_sum_21 = piece_21.sum()
     total_size_21 = piece_21.size
 
@@ -98,8 +100,8 @@ def measure_21_function(adj_full, size_0, size_1, size_2):
     
     return rel_21, total_size_21
 
-def measure_22_function(adj_full, size_2):
-    piece_22 = adj_full[-size_2:, -size_2:]
+def measure_22_function(adj_full, size_0, size_1, size_2):
+    piece_22 = adj_full[size_0+size_1:, size_0+size_1:]
     total_sum_22 = piece_22.sum()
     total_size_22 = piece_22.size
     reduced_size_22 = total_size_22 - size_2

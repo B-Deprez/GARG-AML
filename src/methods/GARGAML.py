@@ -26,10 +26,10 @@ def GARG_AML_node_directed_measures(node, G_copy, G_copy_und, G_copy_rev, includ
     measure_02, size_02 = measure_02_function(adj_full, size_0, size_1, size_2)
     measure_10, size_10 = measure_10_function(adj_full, size_0, size_1)
     measure_11, size_11 = measure_11_function(adj_full, size_0, size_1)
-    measure_12, size_12 = measure_12_function(adj_full, size_0, size_1, size_2)  
-    measure_20, size_20 = measure_20_function(adj_full, size_0, size_2)
-    measure_21, size_21 = measure_21_function(adj_full, size_0, size_1, size_2)
-    measure_22, size_22 = measure_22_function(adj_full, size_2)
+    measure_12, size_12 = measure_12_function(adj_full, size_0, size_1, size_2)
+    measure_20, size_20 = measure_20_function(adj_full, size_0, size_1, size_2)
+    measure_21, size_21 = measure_21_function(adj_full, size_0, size_1)
+    measure_22, size_22 = measure_22_function(adj_full, size_0, size_1, size_2)
 
     if include_size:
         return(
