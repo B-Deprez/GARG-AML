@@ -1,0 +1,21 @@
+# GARG-AML dependencies
+# Install into a fresh virtual environment:
+#   python -m venv .venv && source .venv/bin/activate
+#   pip install -r requirements.txt
+
+# networkx >= 3.0 is required: the pipeline uses
+# nx.community.louvain_communities, which was added in 3.0.
+networkx>=3.0
+
+pandas
+numpy
+scikit-learn
+matplotlib
+tqdm
+
+# Synthetic smurfing graphs are generated with python-igraph
+# (imported as `igraph`).
+igraph
+
+# Notebooks under notebooks/ also use Jupyter; uncomment if you run them.
+# jupyter

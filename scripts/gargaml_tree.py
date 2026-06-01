@@ -20,7 +20,7 @@ from sklearn import tree
 from sklearn import ensemble
 from sklearn.model_selection import train_test_split
 
-from sklearn.metrics import roc_auc_score, average_precision_score
+from sklearn.metrics import precision_score, f1_score, roc_auc_score, average_precision_score
 
 from pickle import dump
 
@@ -46,6 +46,8 @@ def gargaml_boosting(X, y, save = False, save_path = "results/model_boosting.pkl
 
 def evaluate_model(clf, X_test, y_test, plot=False):
     y_pred = clf.predict(X_test)
+    precision = precision_score(y_test, y_pred)
+    f1 = f1_score(y_test, y_pred)
     AUC_ROC = roc_auc_score(y_test, y_pred)
     AUC_PR = average_precision_score(y_test, y_pred)
 
@@ -71,7 +73,7 @@ def evaluate_model(clf, X_test, y_test, plot=False):
         plt.show()
 
 
-    return AUC_ROC, AUC_PR
+    return precision, f1, AUC_ROC, AUC_PR
 
 def data_preparation(dataset, gargaml_columns, directed, score_type):
     str_directed = "directed" if directed else "undirected"
@@ -123,6 +125,12 @@ def main():
     n = len(cut_offs)
     m = len(columns)
 
+    precision_tree_matrix = np.zeros((n, m))
+    precision_boosting_matrix = np.zeros((n, m))
+
+    f1_tree_matrix = np.zeros((n, m))
+    f1_boosting_matrix = np.zeros((n, m))
+
     AUC_ROC_tree_matrix = np.zeros((n, m))
     AUC_ROC_boosting_matrix = np.zeros((n, m))
 
@@ -154,25 +162,42 @@ def main():
 
                 tree_clf = gargaml_tree(X_train, y_train)
 
-                AUC_ROC_tree, AUC_PR_tree = evaluate_model(tree_clf, X_test, y_test)
+                precision_tree, f1_tree, AUC_ROC_tree, AUC_PR_tree = evaluate_model(tree_clf, X_test, y_test)
 
                 boosting_clf = gargaml_boosting(X_train, y_train)
 
-                AUC_ROC_boosting, AUC_PR_boosting = evaluate_model(boosting_clf, X_test, y_test)
+                precision_boosting, f1_boosting, AUC_ROC_boosting, AUC_PR_boosting = evaluate_model(boosting_clf, X_test, y_test)
 
+                precision_tree_matrix[i, j] = precision_tree
+                f1_tree_matrix[i, j] = f1_tree
                 AUC_ROC_tree_matrix[i, j] = AUC_ROC_tree
                 AUC_PR_tree_matrix[i, j] = AUC_PR_tree
 
+                precision_boosting_matrix[i, j] = precision_boosting
+                f1_boosting_matrix[i, j] = f1_boosting
                 AUC_ROC_boosting_matrix[i, j] = AUC_ROC_boosting
                 AUC_PR_boosting_matrix[i, j] = AUC_PR_boosting
 
             except:
+                precision_tree_matrix[i, j] = np.nan
+                f1_tree_matrix[i, j] = np.nan
                 AUC_ROC_tree_matrix[i, j] = np.nan
                 AUC_PR_tree_matrix[i, j] = np.nan
 
+                precision_boosting_matrix[i, j] = np.nan
+                f1_boosting_matrix[i, j] = np.nan
                 AUC_ROC_boosting_matrix[i, j] = np.nan
                 AUC_PR_boosting_matrix[i, j] = np.nan
     
+    precision_tree_df = pd.DataFrame(precision_tree_matrix, columns=columns, index=cut_offs)
+    precision_tree_df.to_csv("results/"+dataset+"_precision_tree_"+str_directed+"_combined.csv")
+    precision_boosting_df = pd.DataFrame(precision_boosting_matrix, columns=columns, index=cut_offs)
+    precision_boosting_df.to_csv("results/"+dataset+"_precision_boosting_"+str_directed+"_combined.csv")
+    f1_tree_df = pd.DataFrame(f1_tree_matrix, columns=columns, index=cut_offs)
+    f1_tree_df.to_csv("results/"+dataset+"_f1_tree_"+str_directed+"_combined.csv")
+    f1_boosting_df = pd.DataFrame(f1_boosting_matrix, columns=columns, index=cut_offs)
+    f1_boosting_df.to_csv("results/"+dataset+"_f1_boosting_"+str_directed+"_combined.csv")
+
     AUC_ROC_tree_df = pd.DataFrame(AUC_ROC_tree_matrix, columns=columns, index=cut_offs)
     AUC_ROC_tree_df.to_csv("results/"+dataset+"_AUC_ROC_tree_"+str_directed+"_combined.csv")
     AUC_ROC_boosting_df = pd.DataFrame(AUC_ROC_boosting_matrix, columns=columns, index=cut_offs)

@@ -153,7 +153,7 @@ def main():
     
     n_patterns_list = [
         3, 
-        5
+        #5
         ] # Number of smurfing patterns to add
 
     results_dict = {}
@@ -181,7 +181,7 @@ def main():
                                 results_dict[string_name] = results
     # Save results
     results_df = pd.DataFrame(results_dict)
-    results_df.to_csv("synthetic_tree_"+str(directed)+"_full.csv")
+    results_df.to_csv("synthetic_tree_"+str(directed)+"_3.csv")
 
 if __name__ == '__main__':
     main()

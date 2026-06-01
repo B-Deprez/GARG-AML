@@ -33,7 +33,42 @@ The repository does not provide any data, due to size constraints. The data can 
 GARG-AML is tested against the current state-of-the-art, namely Flowscope [1] and AutoAudit [2]. The code of these two models is taken from the respective repositories and not included in this one. We refer the interested coder to the corresponding forked repositories for [Flowscope](https://github.com/B-Deprez/flowscope) and [AutoAudit](https://github.com/B-Deprez/AutoAudit), which include changes made to analyse the data sets included in this study. The code for analysing the output of the SOTA on the other hand is provided. 
 
 ## Repository structure
-TBD when code is finished
+```
+src/
+  data/                       # data loading & generation
+    graph_construction.py     #   transaction CSV -> NetworkX graph
+    pattern_construction.py   #   parse *_Patterns.txt into per-node AML labels
+    synthetic_smurfing.py     #   generate synthetic graphs with injected smurfing
+    dataprep_vsc.py           #   split/recombine the large LI-Large CSV
+  methods/
+    GARGAML.py                # core: per-node block measures + GARG-AML score
+    gargaml_scores.py         # turn block measures into summary scores
+    utils/                    #   block-density measures (directed & undirected),
+                              #   node ordering and neighbourhood statistics
+  utils/
+    graph_processing.py       # Louvain community filtering & hub removal
+
+scripts/                      # runnable entry points (run from the repo root)
+  gargaml_directed.py         #   compute directed measures on IBM data
+  gargaml_undirected.py       #   undirected variant
+  gargaml_*_synth.py          #   same, on the synthetic dataset grid
+  gargaml_tree*.py            #   train/evaluate decision-tree & boosting models
+  gargaml_IF.py               #   isolation-forest (unsupervised) variant
+  gargaml_link_label.py       #   edge-/link-level labelling
+  distribution_scores.py      #   score-distribution analysis
+
+notebooks/                    # exploratory analysis and paper figures
+assets/                       # README images
+data/                         # datasets (not tracked — see "Data" above)
+results/, res/                # generated outputs (not tracked)
+```
+
+The typical workflow is two-staged: a `gargaml_*` script computes the GARG-AML
+block measures and writes them to `results/<dataset>_GARGAML_<dir>.csv`, then a
+`gargaml_tree*` / `gargaml_IF` script reads those scores back to train and
+evaluate a classifier. Run every script from the repository root. See
+[`CLAUDE.md`](./CLAUDE.md) for a fuller description of the method, data flow,
+and conventions.
 
 ## Installing 
 We have provided a `requirements.txt` file:

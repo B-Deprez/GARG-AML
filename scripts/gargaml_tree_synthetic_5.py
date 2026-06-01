@@ -152,7 +152,7 @@ def main():
         ] # Generation method for the graph
     
     n_patterns_list = [
-        3, 
+        #3, 
         5
         ] # Number of smurfing patterns to add
 
@@ -181,7 +181,7 @@ def main():
                                 results_dict[string_name] = results
     # Save results
     results_df = pd.DataFrame(results_dict)
-    results_df.to_csv("synthetic_tree_"+str(directed)+"_full.csv")
+    results_df.to_csv("synthetic_tree_"+str(directed)+"_5.csv")
 
 if __name__ == '__main__':
     main()

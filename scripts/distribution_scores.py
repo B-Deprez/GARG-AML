@@ -5,7 +5,7 @@ DIR = "./"
 os.chdir(DIR)
 sys.path.append(DIR)
 
-from sklearn.metrics import roc_auc_score, average_precision_score
+from sklearn.metrics import precision_score, f1_score, roc_auc_score, average_precision_score
 
 from src.data.pattern_construction import define_ML_labels, summarise_ML_labels
 from src.methods.gargaml_scores import define_gargaml_scores
@@ -188,11 +188,13 @@ def distribution_scores_IBM(dataset, results_df, str_directed, str_supervised):
         for j in range(m):
             column = columns[j]
             y_true = ((labels_gargaml_full[column]>cut_off)*1).values
+            precision = precision_score(y_true, (y_pred>0.5)*1)
+            f1 = f1_score(y_true, (y_pred>0.5)*1)
             auc_roc = roc_auc_score(y_true, y_pred)
             auc_pr = average_precision_score(y_true, y_pred)
 
             with open('results/results_performance_IBM_'+str_directed+'.txt', 'a') as f:
-                f.write(dataset+'_'+column+'_'+str(cut_off)+' [AUC-ROC, AUC-PR]: '+str([auc_roc, auc_pr])+'\n')
+                f.write(dataset+'_'+column+'_'+str(cut_off)+' [precision, F1, AUC-ROC, AUC-PR]: '+str([precision, f1, auc_roc, auc_pr])+'\n')
 
 def plot_distribution_synthetic(laundering_combined, columns, str_directed, str_supervised):
     n = len(columns)
@@ -264,9 +266,13 @@ def distribution_scores_synthetic(dataset, results_df, str_directed, str_supervi
     results = dict()
     for column in columns:
         print(column)
+        precision = precision_score(laundering_combined[column], (laundering_combined["GARGAML"]>0.5)*1)
+        f1 = f1_score(laundering_combined[column], (laundering_combined["GARGAML"]>0.5)*1)
         auc_roc = roc_auc_score(laundering_combined[column], laundering_combined["GARGAML"])
         auc_pr = average_precision_score(laundering_combined[column], laundering_combined["GARGAML"])
-        results[column] = [auc_roc, auc_pr]
+        results[column] = [precision, f1, auc_roc, auc_pr]
+        print("Precision: ", precision)
+        print("F1: ", f1)
         print("AUC-ROC: ", auc_roc)
         print("AUC-PR: ", auc_pr)
     
@@ -277,11 +283,11 @@ def general_calculation(dataset, directed, supervised, score_type):
     str_supervised = "supervised" if supervised else "unsupervised"
 
     if supervised:
-        results_df_measures = pd.read_csv("results-0/"+dataset+"_GARGAML_"+str_directed+".csv")
+        results_df_measures = pd.read_csv("results-3/"+dataset+"_GARGAML_"+str_directed+".csv")
         results_df = define_gargaml_scores(results_df_measures, directed=directed, score_type=score_type)
 
     else:
-        results_df = pd.read_csv("results-0/"+dataset+"_GARGAML_"+str_directed+"_IF.csv")
+        results_df = pd.read_csv("results-3/"+dataset+"_GARGAML_"+str_directed+"_IF.csv")
         results_df = results_df.set_index("node")
         results_df = results_df[["anomaly_score"]]
         results_df["anomaly_score"] = results_df["anomaly_score"]*(-1)
@@ -325,7 +331,7 @@ def benchmark_synthetic(
                             print("====", string_name, "====")
                             results_int = general_calculation(string_name, directed, supervised, score_type)
                             with open('results-0/results_performance_'+str_directed+'_'+str_supervised+'.txt', 'a') as f:
-                                f.write(string_name+' [AUC-ROC, AUC-PR]: '+str(results_int)+'\n')
+                                f.write(string_name+' [Precision, F1, AUC-ROC, AUC-PR]: '+str(results_int)+'\n')
                     if generation_method == 'Erdos-Renyi':
                         m_edges = 0
                         for p_edges in p_edges_list:
@@ -333,7 +339,7 @@ def benchmark_synthetic(
                             print("====", string_name, "====")
                             results_int = general_calculation(string_name, directed, supervised, score_type)
                             with open('results-0/results_performance_'+str_directed+'_'+str_supervised+'.txt', 'a') as f:
-                                f.write(string_name+' [AUC-ROC, AUC-PR]: '+str(results_int)+'\n')
+                                f.write(string_name+' [Precision, F1, AUC-ROC, AUC-PR]: '+str(results_int)+'\n')
 
                     if generation_method == 'Watts-Strogatz':
                         for m_edges in m_edges_list:
@@ -342,15 +348,16 @@ def benchmark_synthetic(
                                 print("====", string_name, "====")
                                 results_int = general_calculation(string_name, directed, supervised, score_type)
                                 with open('results-0/results_performance_'+str_directed+'_'+str_supervised+'.txt', 'a') as f:
-                                    f.write(string_name+' [AUC-ROC, AUC-PR]: '+str(results_int)+'\n')
+                                    f.write(string_name+' [Precision, F1, AUC-ROC, AUC-PR]: '+str(results_int)+'\n')
 
 if __name__ == "__main__":
-    dataset = "LI-Large"  
-    directed = False
-    supervised = True
-    score_type = "weighted_average" # basic or weighted_average
+    datasets = ["HI-Small", "LI-Large"]  #Synthetic, HI-Small, LI-Large
+    for dataset in datasets:
+        for directed in [True, False]:
+            supervised = True
+            score_type = "weighted_average" # basic or weighted_average
 
-    if dataset == "synthetic":
-        benchmark_synthetic(directed, supervised, score_type)
-    else: 
-        general_calculation(dataset, directed, supervised, score_type)
+            if dataset == "synthetic":
+                benchmark_synthetic(directed, supervised, score_type)
+            else: 
+                general_calculation(dataset, directed, supervised, score_type)
