@@ -47,6 +47,11 @@ notebooks/*.png
 # Early reference implementation, superseded by src/ — not part of the pipeline.
 initial_code.py
 
+# --- Personal / internal notes ----------------------------------------------
+# Submission/reviewer notes etc. — not code, not needed for reproducibility,
+# and not meant to be public.
+GARG-AML_rejection_feedback.md
+
 # --- Exploratory / scratch notebooks ---------------------------------------
 # Only the notebooks that produce paper figures/analysis are tracked
 # (toyexample, VisualisationResults, VisualisationRunTime, VisualisationNetwork,
