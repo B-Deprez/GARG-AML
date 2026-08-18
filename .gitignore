@@ -49,14 +49,17 @@ initial_code.py
 
 # --- Personal / internal notes ----------------------------------------------
 # Submission/reviewer notes etc. — not code, not needed for reproducibility,
-# and not meant to be public.
+# and not meant to be public. They name reviewers, editors and journal
+# internals, so they must never be pushed.
 GARG-AML_rejection_feedback.md
+GARG-AML_review_feedback.md
+GARG-AML_code_changes.md
 
 # --- Exploratory / scratch notebooks ---------------------------------------
 # Only the notebooks that produce paper figures/analysis are tracked
 # (toyexample, VisualisationResults, VisualisationRunTime, VisualisationNetwork,
-# DistributionScores). The ones below are one-off exploration, sanity checks or
-# dev scratch and are kept out of git.
+# DistributionScores, LouvainEdgeSeverance). The ones below are one-off
+# exploration, sanity checks or dev scratch and are kept out of git.
 notebooks/AnalysisData.ipynb
 notebooks/AnalysisParallel.ipynb
 notebooks/AnalysisSyntheticData.ipynb
