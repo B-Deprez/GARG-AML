@@ -30,11 +30,16 @@ mix the two indices (code task 12 = model naming, P12 = the typo lists).
 **Task ordering is not free.** Three tasks have hard dependencies:
 
 1. **Task 2 first** — the ranking-metrics module (Precision@K, Recall@K, AP, lift,
-   TP@top-N). Not started: there is no evaluation module under `src/`; every script
-   defines its own `evaluate_model`. Everything downstream must report through the new
-   module. Do not let a new model build its own parallel evaluation path — note that
-   `scripts/gargaml_tree_blocks.py` already did, and folding it back in is part of the
-   task.
+   TP@top-N). Not started in code, but **fully specified**: see "Design (agreed)" under
+   §2 of `GARG-AML_code_changes.md` for the settled API, output schema and retrofit list.
+   Implement that, do not redesign it. The module goes in **`src/utils/evaluation.py`**
+   (beside `naming.py`); every script currently defines its own `evaluate_model` and all
+   six must route through it. Do not let a new model build its own parallel evaluation
+   path — note that `scripts/gargaml_tree_blocks.py` already did, and folding it back in
+   is part of the task. Two invariants worth repeating here: `evaluate_model` returns a
+   **dict**, and the shared writer must keep emitting today's
+   `<dataset>_<metric>_<model>_<direction>_combined.csv` files unchanged so the
+   visualisation notebooks need no edits.
 2. **Task 3 second** — refactor the feature matrix into separable column groups
    (GARG-AML scores / block densities+sizes / neighbourhood summary stats). This
    unblocks the topology-only ablation and the feature-matrix documentation, and must
@@ -91,6 +96,13 @@ revision. Do not add new hard-coded uses of them:
 labels) rather than `predict_proba`. AUC-PR is the paper's primary threshold-free metric,
 and the ranking metrics of task 2 (P@K, lift, TP@top-N) all need a continuous score, so
 the new evaluation module must take scores, not labels.
+
+Still live — all five call sites are unfixed. The fix lands in one place,
+`src/utils/evaluation.py::model_scores` (`predict_proba[:, 1]`, falling back to
+`decision_function`, then `-score_samples` for the isolation forest). Note that this also
+*delivers* one of the metrics the reviewers ask for rather than adding it:
+`average_precision_score` already **is** average precision, so it is the existing
+`AUC_PR` column computed correctly, not a new column.
 
 ---
 
