@@ -45,18 +45,19 @@ sys.path.append(DIR)
 
 from pickle import dump
 
-import numpy as np
 import pandas as pd
 from sklearn import ensemble, tree
-from sklearn.metrics import (
-    average_precision_score,
-    f1_score,
-    precision_score,
-    roc_auc_score,
-)
-from sklearn.model_selection import train_test_split
 
 from src.data.pattern_construction import define_ML_labels, summarise_ML_labels
+from src.utils.evaluation import (
+    SEED,
+    evaluate_model,
+    holdout_split,
+    metric_records,
+    nan_metrics,
+    write_metrics,
+)
+from src.utils.naming import gargaml_key
 
 
 # ---------------------------------------------------------------------------
@@ -100,15 +101,6 @@ def gargaml_boosting_blocks(X, y, save=False, save_path="results/model_boosting_
     return clf
 
 
-def evaluate_model(clf, X_test, y_test):
-    y_pred = clf.predict(X_test)
-    precision = precision_score(y_test, y_pred)
-    f1 = f1_score(y_test, y_pred)
-    auc_roc = roc_auc_score(y_test, y_pred)
-    auc_pr = average_precision_score(y_test, y_pred)
-    return precision, f1, auc_roc, auc_pr
-
-
 # ---------------------------------------------------------------------------
 # Data preparation: per-account block features joined with AML labels
 # ---------------------------------------------------------------------------
@@ -141,12 +133,10 @@ def data_preparation_blocks(dataset, directed):
     return combined, feature_cols
 
 
-def data_split(combined, feature_cols, target, cutoff):
+def data_split(combined, feature_cols, target, cutoff, seed=SEED):
     X = combined[feature_cols]
     y = (combined[target] > cutoff).astype(int).values
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.3, random_state=1997, stratify=y
-    )
+    X_train, X_test, y_train, y_test = holdout_split(X, y, seed=seed)
     return X_train, X_test, y_train, y_test
 
 
@@ -154,7 +144,7 @@ def data_split(combined, feature_cols, target, cutoff):
 # Main
 # ---------------------------------------------------------------------------
 
-def run_one_direction(dataset, directed):
+def run_one_direction(dataset, directed, seed=SEED):
     str_directed = "directed" if directed else "undirected"
     cut_offs = [0.1, 0.2, 0.3, 0.5, 0.9]
     columns = [
@@ -177,57 +167,61 @@ def run_one_direction(dataset, directed):
     }).to_csv(schema_path, index=False)
     print(f"  feature schema -> {schema_path}")
 
-    n, m = len(cut_offs), len(columns)
-    metric_matrices = {
-        "precision_tree":     np.zeros((n, m)),
-        "precision_boosting": np.zeros((n, m)),
-        "f1_tree":            np.zeros((n, m)),
-        "f1_boosting":        np.zeros((n, m)),
-        "AUC_ROC_tree":       np.zeros((n, m)),
-        "AUC_ROC_boosting":   np.zeros((n, m)),
-        "AUC_PR_tree":        np.zeros((n, m)),
-        "AUC_PR_boosting":    np.zeros((n, m)),
-    }
-    imbalance = np.zeros((n, m))
+    models = [
+        (gargaml_key("tree", directed), gargaml_tree_blocks),
+        (gargaml_key("boost", directed), gargaml_boosting_blocks),
+    ]
 
-    for i, cutoff in enumerate(cut_offs):
-        for j, target in enumerate(columns):
+    records = []
+
+    for cutoff in cut_offs:
+        for target in columns:
             print(f"  cutoff={cutoff}  target={target}")
+
+            context = dict(
+                dataset = dataset,
+                direction = str_directed,
+                features = "blocks", # group (b) only: block densities + sizes, no degree/score stats
+                cutoff = cutoff,
+                target = target,
+                seed = seed,
+            )
+
             try:
                 X_train, X_test, y_train, y_test = data_split(
-                    combined, feature_cols, target, cutoff
+                    combined, feature_cols, target, cutoff, seed=seed
                 )
-                imbalance[i, j] = y_train.sum() / len(y_train)
+            except Exception as exc: # Too few labels to even split: no models for this cell
+                print(f"    no split: {exc!r}")
+                records += metric_records({"imbalance": 0.0}, status = "skipped: "+str(exc), model = "", **context)
+                for model_key, _ in models:
+                    records += metric_records(nan_metrics(), status = "skipped: "+str(exc), model = model_key, **context)
+                continue
 
-                tree_clf = gargaml_tree_blocks(X_train, y_train)
-                p_t, f_t, r_t, pr_t = evaluate_model(tree_clf, X_test, y_test)
+            n_test = len(y_test)
+            n_pos = int(sum(y_test))
 
-                boost_clf = gargaml_boosting_blocks(X_train, y_train)
-                p_b, f_b, r_b, pr_b = evaluate_model(boost_clf, X_test, y_test)
+            records += metric_records(
+                {"imbalance": y_train.sum() / len(y_train)},
+                n_test = n_test, n_pos = n_pos, model = "", **context
+                )
 
-                metric_matrices["precision_tree"][i, j] = p_t
-                metric_matrices["f1_tree"][i, j] = f_t
-                metric_matrices["AUC_ROC_tree"][i, j] = r_t
-                metric_matrices["AUC_PR_tree"][i, j] = pr_t
+            for model_key, fit_model in models:
+                try: # If too few labels, the model will not work. The cell is reported as NaN, with the reason
+                    clf = fit_model(X_train, y_train)
+                    metrics = evaluate_model(clf, X_test, y_test)
+                    status = "ok"
+                except Exception as exc:
+                    print(f"    {model_key} skipped: {exc!r}")
+                    metrics = nan_metrics()
+                    status = "skipped: "+str(exc)
 
-                metric_matrices["precision_boosting"][i, j] = p_b
-                metric_matrices["f1_boosting"][i, j] = f_b
-                metric_matrices["AUC_ROC_boosting"][i, j] = r_b
-                metric_matrices["AUC_PR_boosting"][i, j] = pr_b
-            except Exception as exc:
-                # Same try/except pattern as gargaml_tree.py: too few positives
-                # in this (cutoff, pattern) cell -> NaN entry, not an error.
-                print(f"    skipped: {exc!r}")
-                for key in metric_matrices:
-                    metric_matrices[key][i, j] = np.nan
+                records += metric_records(
+                    metrics, status = status, n_test = n_test, n_pos = n_pos,
+                    model = model_key, **context
+                    )
 
-    for name, mat in metric_matrices.items():
-        out = pd.DataFrame(mat, columns=columns, index=cut_offs)
-        out.to_csv(f"results/{dataset}_{name}_{str_directed}_blocks_combined.csv")
-    pd.DataFrame(imbalance, columns=columns, index=cut_offs).to_csv(
-        f"results/{dataset}_imbalance_{str_directed}_blocks_combined.csv"
-    )
-    print(f"  wrote {len(metric_matrices) + 1} result CSVs with suffix _blocks_combined")
+    write_metrics(records, dataset, str_directed, suffix="_blocks")
 
 
 def main():
