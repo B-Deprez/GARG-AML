@@ -36,6 +36,10 @@ MODEL_DISPLAY_NAMES: dict[str, str] = {
     "gargaml_boost_u": "GARG-AML Undir. Boost",
     "gargaml_tree_d":  "GARG-AML Dir. Tree",
     "gargaml_boost_d": "GARG-AML Dir. Boost",
+    # Isolation-forest baseline (scripts/gargaml_IF.py): directed only -- it reads the
+    # 9 directed block-density measures unconditionally, so there is no _u counterpart
+    # to add until that script itself supports the undirected measure columns.
+    "gargaml_if_d":    "GARG-AML Isolation Forest",
 }
 
 # Canonical column / legend / x-axis order. Keep this list aligned with

@@ -95,6 +95,9 @@ LEGACY_MODEL_TOKENS = {
     "gargaml_tree_d": "tree",
     "gargaml_boost_u": "boosting",
     "gargaml_boost_d": "boosting",
+    # No prior file exists for this one -- gargaml_IF.py's IF_AUC never persisted
+    # results before this retrofit -- so the token is new, not inherited.
+    "gargaml_if_d": "isolationforest",
 }
 
 

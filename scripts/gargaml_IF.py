@@ -7,10 +7,8 @@ from tqdm import tqdm
 
 import networkx as nx
 import pandas as pd
-import numpy as np
 
 from sklearn.ensemble import IsolationForest
-from sklearn.metrics import roc_auc_score, average_precision_score
 
 DIR = "./"
 os.chdir(DIR)
@@ -22,6 +20,15 @@ from src.utils.graph_processing import graph_community
 from src.methods.utils.neighbourhood_functions import GARG_AML_nodeselection
 
 from src.data.pattern_construction import define_ML_labels, summarise_ML_labels
+from src.utils.evaluation import SEED, evaluate_scores, metric_records, nan_metrics, write_metrics
+
+# IsolationForest is unsupervised and never sees labels during fit, so fitting it on
+# every account (rather than a 70/30 split) is not label leakage -- it is standard
+# practice for a density estimator, and keeps this baseline's published numbers
+# unchanged from earlier revisions. Unlike gargaml_tree.py/_blocks.py/_synthetic*.py,
+# this script's own AUC computation already used the continuous anomaly score, not
+# clf.predict() -- it was never one of the five call sites with the known defect.
+IF_MODEL_KEY = "gargaml_if_d"  # directed only; see src/utils/naming.py
 
 def gargaml_IF(dataset = "HI-Small", directed = True):
     path = "data/"+dataset+"_Trans.csv"
@@ -137,40 +144,50 @@ def data_preparation(dataset, measure_df):
     
     return laundering_combined
 
-def IF_AUC(dataset, measure_df):
+def IF_AUC(dataset, measure_df, directed=True):
+    str_directed = "directed" if directed else "undirected"
     cut_offs = [0.1, 0.2, 0.3, 0.5, 0.9]
     columns = ['Is Laundering', 'FAN-OUT', 'FAN-IN', 'GATHER-SCATTER', 'SCATTER-GATHER', 'CYCLE', 'RANDOM', 'BIPARTITE', 'STACK']
 
-    n = len(cut_offs)
-    m = len(columns)
-
-    AUC_ROC_matrix = np.zeros((n, m))
-    AUC_PR_matrix = np.zeros((n, m))
-
     laundering_combined = data_preparation(dataset, measure_df)
+    y_score_full = laundering_combined['anomaly_score']
 
-    for i in range(n):
-        cutoff = cut_offs[i]
-        for j in range(m):
-            target = columns[j]
-
+    records = []
+    for cutoff in cut_offs:
+        for target in columns:
             print(cutoff, target)
 
-            rel_labels = laundering_combined[target]
-            
+            # Evaluated on every account, not a 30% slice: fit and score already ran
+            # on the full population above, so this reports what was actually
+            # computed, and keeps this baseline's published numbers unchanged.
+            context = dict(
+                dataset=dataset, direction=str_directed,
+                features="block_densities_only",  # measure_00..measure_22 only, no
+                                                    # sizes -- not literally task 3's
+                                                    # group (b), which also has sizes
+                cutoff=cutoff, target=target, seed=SEED,
+            )
+            y_true = (laundering_combined[target] > cutoff).astype(int)
+
             try:
-                y_pred = laundering_combined['anomaly_score']
-                y_test = (rel_labels>cutoff)*1
+                # No y_pred: this baseline has no natural 0/1 prediction, so
+                # precision/f1 come back NaN rather than invented at some threshold
+                # (evaluate_scores' documented behaviour) -- only AUC/ranking metrics
+                # were ever meaningful for it.
+                metrics = evaluate_scores(y_true, y_score_full)
+                status = "ok"
+            except Exception as exc:
+                print("    skipped: "+repr(exc))
+                metrics = nan_metrics()
+                status = "skipped: "+str(exc)
 
-                AUC_ROC = roc_auc_score(y_test, y_pred)
-                AUC_PR = average_precision_score(y_test, y_pred)
+            records += metric_records(
+                metrics, status=status,
+                n_test=len(y_true), n_pos=int(y_true.sum()),
+                model=IF_MODEL_KEY, **context
+            )
 
-                AUC_ROC_matrix[i,j] = AUC_ROC
-                AUC_PR_matrix[i,j] = AUC_PR
-            except:
-                AUC_ROC_matrix[i,j] = np.nan
-                AUC_PR_matrix[i,j] = np.nan
-    pass
+    write_metrics(records, dataset, str_directed, suffix="_if")
 
 if __name__ == "__main__":
     dataset = "HI-Small"
@@ -180,4 +197,4 @@ if __name__ == "__main__":
     measure_df = gargaml_IF(dataset = dataset, directed = directed)
     if need_to_save:
         measure_df.to_csv("results/"+dataset+"_GARGAML_"+str_directed+"_IF.csv", index = False)
-    IF_AUC(dataset, measure_df)
+    IF_AUC(dataset, measure_df, directed=directed)
