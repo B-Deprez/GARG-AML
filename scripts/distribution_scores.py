@@ -5,15 +5,25 @@ DIR = "./"
 os.chdir(DIR)
 sys.path.append(DIR)
 
-from sklearn.metrics import precision_score, f1_score, roc_auc_score, average_precision_score
-
 from src.data.pattern_construction import define_ML_labels, summarise_ML_labels
 from src.methods.gargaml_scores import define_gargaml_scores
+from src.utils.evaluation import LEGACY_METRICS, evaluate_scores, metric_names
 import pandas as pd
 import timeit
 
 import matplotlib.pyplot as plt
 import numpy as np
+
+# This file's own convention for "not available" is -1 (see the fillna(-1) calls
+# below), not NaN: results are logged as repr()'d Python literals in free-text
+# files, read back with a bare eval() in notebooks/VisualisationResults.ipynb that
+# has no `nan` name bound in scope -- a stray NaN anywhere would raise there and
+# (per that notebook's own except) zero out every value on the line, not just the
+# undefined one. The raw GARG-AML score has no natural 0/1 prediction (range
+# [-1, 1], not a probability), so evaluate_scores reports precision/f1 as NaN;
+# _sanitise substitutes -1 before anything gets str()'d into a log line.
+def _sanitise(value):
+    return -1 if isinstance(value, float) and np.isnan(value) else value
 
 def divergence_metric(dist_0, dist_1):
     mean_0 = np.mean(dist_0)
@@ -175,6 +185,9 @@ def distribution_scores_IBM(dataset, results_df, str_directed, str_supervised):
     labels_gargaml_full = laundering_combined.merge(results_df[["GARGAML"]], left_index=True, right_index=True, how="outer").fillna(-1)
     del laundering_combined
 
+    # Evaluated on every account, not a 30% slice -- this score is never fit to
+    # anything, and this keeps the published numbers unchanged from earlier
+    # revisions (same decision as gargaml_IF.py, for the same reason).
     y_pred = labels_gargaml_full["GARGAML"].values
 
     cut_offs = [0.1, 0.2, 0.3, 0.5, 0.9]
@@ -187,14 +200,37 @@ def distribution_scores_IBM(dataset, results_df, str_directed, str_supervised):
         cut_off = cut_offs[i]
         for j in range(m):
             column = columns[j]
+            print(cut_off, column)
             y_true = ((labels_gargaml_full[column]>cut_off)*1).values
-            precision = precision_score(y_true, (y_pred>0.5)*1)
-            f1 = f1_score(y_true, (y_pred>0.5)*1)
-            auc_roc = roc_auc_score(y_true, y_pred)
-            auc_pr = average_precision_score(y_true, y_pred)
 
+            try:
+                # No natural 0/1 prediction for a raw score -- precision/f1 come
+                # back NaN rather than invented at some threshold (the range is
+                # [-1, 1], so thresholding at 0.5 the way this used to would
+                # predict almost everything negative).
+                metrics = evaluate_scores(y_true, y_pred)
+                result_list = [_sanitise(metrics[name]) for name in metric_names()]
+            except Exception as exc:
+                print("    skipped: "+repr(exc))
+                result_list = [-1 for _ in metric_names()]
+
+            # Extra elements after index 3 (the new ranking metrics, in the fixed
+            # order metric_names() returns) are safe: VisualisationResults.ipynb
+            # reads results[0..3] by position, not by unpacking a fixed-length
+            # tuple, so it ignores anything past index 3. What is NOT safe is a
+            # nested dict or any other ':' here: that notebook cell finds the
+            # data with line.split(': ', maxsplit=3), so more than 3 occurrences
+            # of ': ' anywhere on the line -- which a dict repr's `'key': value`
+            # pairs supply in abundance -- truncates the line before the real
+            # list. A flat list of plain numbers has none, so it's the only
+            # shape that's actually safe to append here. Also no '_' in the
+            # label text: that same cell parses the whole line with
+            # line.split('_'), not just the dataset/pattern prefix, so a third
+            # underscore anywhere else shifts every index after it.
             with open('results/results_performance_IBM_'+str_directed+'.txt', 'a') as f:
-                f.write(dataset+'_'+column+'_'+str(cut_off)+' [precision, F1, AUC-ROC, AUC-PR]: '+str([precision, f1, auc_roc, auc_pr])+'\n')
+                f.write(dataset+'_'+column+'_'+str(cut_off)+' [precision, F1, AUC-ROC, AUC-PR, then '
+                        +'ranking metrics in a fixed order, see evaluation.py]: '
+                        +str(result_list)+'\n')
 
 def plot_distribution_synthetic(laundering_combined, columns, str_directed, str_supervised):
     n = len(columns)
@@ -266,16 +302,28 @@ def distribution_scores_synthetic(dataset, results_df, str_directed, str_supervi
     results = dict()
     for column in columns:
         print(column)
-        precision = precision_score(laundering_combined[column], (laundering_combined["GARGAML"]>0.5)*1)
-        f1 = f1_score(laundering_combined[column], (laundering_combined["GARGAML"]>0.5)*1)
-        auc_roc = roc_auc_score(laundering_combined[column], laundering_combined["GARGAML"])
-        auc_pr = average_precision_score(laundering_combined[column], laundering_combined["GARGAML"])
+        y_true = laundering_combined[column].values
+        y_pred = laundering_combined["GARGAML"].values
+
+        try:
+            # No natural 0/1 prediction for a raw score -- see distribution_scores_IBM.
+            metrics = evaluate_scores(y_true, y_pred)
+            precision, f1, auc_roc, auc_pr = (_sanitise(metrics[k]) for k in LEGACY_METRICS)
+        except Exception as exc:
+            print("    skipped: "+repr(exc))
+            precision = f1 = auc_roc = auc_pr = -1
+
+        # Length fixed at exactly 4: notebooks/VisualisationResults.ipynb's
+        # gargaml_results() unpacks this list as `precision, f1_score, ROC, PR =
+        # tuple(...)` -- a 5th element (e.g. the new ranking metrics) would raise
+        # there on every line and silently zero out the whole row. Unlike
+        # distribution_scores_IBM's log, this one has no slot to add them to.
         results[column] = [precision, f1, auc_roc, auc_pr]
         print("Precision: ", precision)
         print("F1: ", f1)
         print("AUC-ROC: ", auc_roc)
         print("AUC-PR: ", auc_pr)
-    
+
     return results
 
 def general_calculation(dataset, directed, supervised, score_type):
