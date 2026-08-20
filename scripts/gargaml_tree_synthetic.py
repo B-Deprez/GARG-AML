@@ -8,18 +8,42 @@ os.chdir(DIR)
 sys.path.append(DIR)
 
 
+import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 
 from src.methods.gargaml_scores import define_gargaml_scores, summarise_gargaml_scores
 from src.data.graph_construction import construct_synthetic_graph
 from src.utils.graph_processing import graph_community
+from src.utils.evaluation import SEED, evaluate_model, holdout_split, metric_names
 
 from sklearn import tree
 from sklearn import ensemble
-from sklearn.model_selection import train_test_split
 
-from sklearn.metrics import precision_score, f1_score, roc_auc_score, average_precision_score
+# This script's own established convention (see data_preparation's fillna(-1) below)
+# uses -1 for "missing", and a total training failure is reported as 0 (see
+# gargaml_tree_synthetic's except branch) -- not NaN. The result cells below are
+# serialised as repr()'d dicts inside CSV cells and parsed back with a bare eval() in
+# notebooks/VisualisationResults.ipynb, which has no `nan` name bound in scope: a single
+# stray NaN anywhere in a cell would raise inside that eval() and silently zero out the
+# real Precision/F1/AUC numbers alongside it. LEGACY_METRIC_RENAME maps the shared
+# module's key spelling onto this file's established capitalisation; _legacy_metric_dict
+# substitutes -1 for any NaN (only R@K/lift@K can be NaN, when a cell has zero positives)
+# so every cell this script writes stays eval()-safe.
+LEGACY_METRIC_RENAME = {"precision": "Precision", "f1": "F1"}
+
+
+def _legacy_metric_dict(metrics):
+    out = {}
+    for key, value in metrics.items():
+        key = LEGACY_METRIC_RENAME.get(key, key)
+        if isinstance(value, float) and np.isnan(value):
+            value = -1
+        out[key] = value
+    return out
+
+
+def _legacy_zero_metrics():
+    return {LEGACY_METRIC_RENAME.get(k, k): 0 for k in metric_names()}
 
 def data_preparation(dataset, gargaml_columns, directed, score_type):
     directed_str = 'directed' if directed else 'undirected'
@@ -47,12 +71,12 @@ def data_preparation(dataset, gargaml_columns, directed, score_type):
     results_df.fillna(-1, inplace=True)
     return results_df
 
-def data_split(results_df, gargaml_columns, target, test_size=0.3):
+def data_split(results_df, gargaml_columns, target, test_size=0.3, seed=SEED):
     X_df = results_df[gargaml_columns]
     y = results_df[target]*1
 
     # Split the data into training and testing sets
-    X_train, X_test, y_train, y_test = train_test_split(X_df, y, test_size=test_size, random_state=1997, stratify=y)
+    X_train, X_test, y_train, y_test = holdout_split(X_df, y, test_size=test_size, seed=seed)
 
     return X_train, X_test, y_train, y_test
 
@@ -74,28 +98,14 @@ def train_pipeline(string_name, pattern, tree_model, directed):
     if tree_model == 'tree':
         clf = tree.DecisionTreeClassifier(min_samples_leaf=10, random_state=1997)
         clf.fit(X_train, y_train)
-        #tree.plot_tree(
-        #    clf, 
-        #    feature_names=gargaml_columns, 
-        #    proportion=False,
-        #    impurity=False, 
-        #    class_names=['not_'+pattern, pattern],
-        #    filled=True
-        #    )
-        #plt.savefig('res/tree_'+string_name+'_'+pattern+'.pdf')
     elif tree_model == 'boosting':
         clf = ensemble.GradientBoostingClassifier(min_samples_leaf=10, random_state=1997)
         clf.fit(X_train, y_train)
     else:   
         raise ValueError("Invalid tree model specified. Choose 'tree' or 'boosting'.")
 
-    # Evaluate model 
-    y_pred = clf.predict(X_test)
-    precision = precision_score(y_test, y_pred)
-    f1 = f1_score(y_test, y_pred)
-    AUC_ROC = roc_auc_score(y_test, y_pred)
-    AUC_PR = average_precision_score(y_test, y_pred)
-    return precision, f1, AUC_ROC, AUC_PR
+    # Evaluate model
+    return _legacy_metric_dict(evaluate_model(clf, X_test, y_test))
 
 def gargaml_tree_synthetic(string_name, directed):
     patterns = [
@@ -113,16 +123,11 @@ def gargaml_tree_synthetic(string_name, directed):
         results[pattern] = {}
         for tree_model in tree_models:
             try:
-                precision, f1, AUC_ROC, AUC_PR = train_pipeline(string_name, pattern, tree_model, directed)
-            except:
-                print("Error in training pipeline for: {}".format(string_name))
-                precision = f1 = AUC_ROC = AUC_PR = 0
-            results[pattern][tree_model] = {
-                'Precision': precision,
-                'F1': f1,
-                'AUC_ROC': AUC_ROC,
-                'AUC_PR': AUC_PR
-            }
+                metrics = train_pipeline(string_name, pattern, tree_model, directed)
+            except Exception as exc:
+                print("Error in training pipeline for: {} ({!r})".format(string_name, exc))
+                metrics = _legacy_zero_metrics()
+            results[pattern][tree_model] = metrics
     return results
 
 
