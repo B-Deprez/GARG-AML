@@ -40,14 +40,17 @@ mix the two indices (code task 12 = model naming, P12 = the typo lists).
    **dict**, and the shared writer must keep emitting today's
    `<dataset>_<metric>_<model>_<direction>_combined.csv` files unchanged so the
    visualisation notebooks need no edits.
-2. **Task 3 second** — refactor the feature matrix into separable column groups
-   (GARG-AML scores / block densities+sizes / neighbourhood summary stats). This
-   unblocks the topology-only ablation and the feature-matrix documentation, and must
-   land before any tree/boost re-runs. **Partly done:**
-   `scripts/gargaml_tree_blocks.py` runs a block-only (group b) ablation and emits a
-   feature-schema CSV, but it duplicates the whole train/eval path instead of using
-   shared column groups, and the group (c) ablation the reviewers asked for is still
-   missing.
+2. **Task 3 — DONE.** The feature matrix is split into four separable column groups in
+   **`src/utils/features.py`** (a: score, b: block densities+sizes, c: own+neighbour
+   degree stats, d: neighbour score stats) and four named configs: `full` (published),
+   `blocks`, `topology` (the (c)-only ablation R2-M5 asked for) and `all`.
+   `scripts/gargaml_tree.py` runs all four over both directions off one data preparation;
+   `gargaml_tree_blocks.py` is now a thin entry point on that shared path. Two facts worth
+   carrying forward: **`full` is (a)+(c)+(d), never (b)** — the published model never
+   received block densities, so that confound was never in the published numbers — and
+   **`topology` is direction-free**, because group (c) is computed on the undirected
+   reduced graph either way, so it runs once (`is_direction_free()`), not once per
+   direction.
 3. **Task 1 third** — the GraphSAGE baseline (`pytorch-geometric`). Not started; no
    torch / torch-geometric in `requirements.txt` yet. Highest compute risk; get one
    HI-Small run working end to end before queuing LI-Large on VSC.
@@ -58,10 +61,12 @@ them already have work on disk:
 - **Task 4** — `notebooks/LouvainEdgeSeverance.ipynb` quantifies the % of edges severed
   on every dataset, but only at `resolution = 10`. The resolution sweep, the
   split-pattern diagnostic and the no-Louvain run are still open.
-- **Task 12** — `src/utils/naming.py` is the canonical name map and is used by
-  `DistributionScores`, `VisualisationResults` and `VisualisationRunTime`. Still open:
-  the `scripts/` do not route through it, and it has no entries for the block-only
-  ablation or GraphSAGE.
+- **Task 12** — `src/utils/naming.py` is the canonical name map, used by the
+  `DistributionScores`, `VisualisationResults` and `VisualisationRunTime` notebooks and
+  now by `scripts/gargaml_tree.py` (via `gargaml_key()` / `pretty_config()`). Task 3 added
+  `pretty_config()` for the ablations — note that the `topology` model is deliberately
+  **not** labelled "GARG-AML" (it contains none). Still open: an entry for GraphSAGE
+  (task 1).
 
 **Before committing:** strip Jupyter notebook outputs (`nbstripout` or manual). Output
 cells previously caused an HTTP 400 push failure on this repo. This is *not* automated
@@ -77,9 +82,9 @@ revision. Do not add new hard-coded uses of them:
 | Value | Status |
 |---|---|
 | Louvain `resolution = 10` | Already a keyword argument (`graph_community(G, resolution=10)`); every call site takes the default and `LouvainEdgeSeverance.ipynb` hardcodes 10. Task 4 sweeps it — thread the value through the call sites, do not add new literals |
-| 70/30 single split | Task 7 adds 5 repeated seeds — split logic must accept a seed |
+| 70/30 single split | Task 7 replaces it with **5-fold stratified CV on the IBM data only** — split logic must offer both `holdout_split` (synthetic, unchanged) and `cv_splits`; the fold partition is persisted to `results/<dataset>_folds.csv` and reused by GraphSAGE |
 | Label cut-off list | Task 2 adds threshold-free ranking metrics alongside |
-| Model names (`gargaml tree undirected` vs `GARG-AML Undir. Tree`) | Task 12 standardises — `src/utils/naming.py` is the one canonical scheme; route new labels through `pretty()` |
+| Model names (`gargaml tree undirected` vs `GARG-AML Undir. Tree`) | Task 12 standardises — `src/utils/naming.py` is the one canonical scheme; route new labels through `pretty()`, or `pretty_config()` when a task-3 feature config is involved |
 
 ### Do not "fix" these
 
@@ -122,8 +127,10 @@ Requirements: **networkx >= 3.0** (`nx.community.louvain_communities`). Measure 
 parallelise via `multiprocessing.Pool`, capped at `min(4, cpu_count() // 2)` workers.
 
 **Reproducibility:** Louvain uses `seed=1997`; sklearn splits/models use
-`random_state=1997`. Keep these fixed when comparing runs. Where task 7 introduces
-multiple seeds, 1997 stays the first seed.
+`random_state=1997` — including the `DecisionTreeClassifier`, which was missing it in
+`gargaml_tree.py` until task 3 (sklearn breaks tied splits at random, so an unseeded tree
+is not reproducible run to run; any tree result written before that fix is not comparable). Keep these fixed when comparing runs. Task 7's 5-fold CV keeps 1997
+as the `StratifiedKFold` shuffle seed, so the partition is reproducible.
 
 ---
 
@@ -217,7 +224,11 @@ src/
       neighbourhood_functions.py        # node ordering, neighbour stats, final DataFrame
   utils/
     graph_processing.py       # graph_community() (Louvain filter), graph_degree() (hub removal)
-    naming.py                 # canonical model names (task 12): MODEL_DISPLAY_NAMES, pretty()
+    naming.py                 # canonical model names (task 12): MODEL_DISPLAY_NAMES, pretty(),
+                              #   pretty_config() for the task-3 ablation labels
+    evaluation.py             # shared metrics/splits/result writing (task 2)
+    features.py               # the four feature groups + configs (task 3): feature_columns(),
+                              #   is_direction_free(), feature_schema()
 
 scripts/                      # runnable entry points — run from repo ROOT
   gargaml_directed.py         # directed measures on IBM data
@@ -225,7 +236,8 @@ scripts/                      # runnable entry points — run from repo ROOT
   gargaml_directed_synth.py   # directed measures on the synthetic grid
   gargaml_undirected_synth.py # undirected synthetic variant
   gargaml_tree.py             # decision tree + boosting on IBM scores
-  gargaml_tree_blocks.py      # block-only ablation (partial task 3) — duplicated eval path
+  gargaml_tree_blocks.py      # block-only ablation (task 3) — thin entry point on the
+                              #   shared path in gargaml_tree.py
   gargaml_tree_synthetic.py   # tree models on synthetic data
   gargaml_tree_synthetic_3.py # …with 3 injected patterns
   gargaml_tree_synthetic_5.py # …with 5 injected patterns

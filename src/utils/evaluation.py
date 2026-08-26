@@ -31,7 +31,10 @@ Three jobs:
 Evaluation population
 ---------------------
 Metrics are computed on the 30% test split only, consistent with the
-precision/F1/AUC numbers in the paper. ``K`` is an absolute alert count,
+precision/F1/AUC numbers in the paper. (Task 7 moves the IBM runs to
+5-fold CV, where the disjoint folds also allow a pooled out-of-fold pass
+over every account -- see that task before changing the population here.)
+``K`` is an absolute alert count,
 so it can exceed the number of test rows or the number of positives; the
 metric is still written, with ``n_test`` and ``n_pos`` beside it, so that
 e.g. ``R@1000 = 1.0`` off 12 positives is readable as trivial rather than
@@ -109,7 +112,11 @@ def holdout_split(X, y, test_size=0.3, seed=SEED):
     """The one 70/30 stratified split, so every model sees the same slice.
 
     Transductive by design (the split is on the feature table, not on the
-    graph); task 7 varies ``seed`` for repeated splits.
+    graph). Task 7 supersedes this for the IBM data with 5-fold stratified
+    CV (a ``cv_splits`` helper beside this one, sharing ``seed``); it does
+    *not* vary ``seed`` for repeated random draws, because overlapping test
+    sets deflate the reported spread. This function stays as-is for the
+    synthetic scripts, which keep the single split.
     """
     return train_test_split(
         X, y, test_size=test_size, random_state=seed, stratify=y
