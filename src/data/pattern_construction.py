@@ -154,14 +154,22 @@ def summarise_ML_labels(transactions_df_extended, pattern_columns):
 
 def combine_patterns_GARGAML(results_df, laundering_df, columns = ["GARGAML"]):
     # This function can take multiple columns as input and return a dictionary of scores for each column
-    scores_dict = {column: [] for column in columns} 
+    missing = [column for column in columns if column not in results_df.columns]
+    if missing: # would otherwise come out as an all -2 feature, silently
+        raise KeyError("columns absent from the GARG-AML results: "+str(missing))
+
+    scores_dict = {column: [] for column in columns}
 
     for account in laundering_df.index:
-        for column in columns:
-            try:
-                line = results_df.loc[account]
-                scores_dict[column].append(line[column])
-            except:
+        try: # one lookup per account, not one per column: task 3 asks for up to
+             # 28 columns and this lookup is what the function spends its time on
+            line = results_df.loc[account]
+        except: # no GARG-AML row for this account
+            for column in columns:
                 scores_dict[column].append(-2)
-    
+            continue
+
+        for column in columns:
+            scores_dict[column].append(line[column])
+
     return scores_dict
