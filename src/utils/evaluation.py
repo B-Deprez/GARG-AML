@@ -30,15 +30,28 @@ Three jobs:
 
 Evaluation population
 ---------------------
-Metrics are computed on the 30% test split only, consistent with the
-precision/F1/AUC numbers in the paper. (Task 7 moves the IBM runs to
-5-fold CV, where the disjoint folds also allow a pooled out-of-fold pass
-over every account -- see that task before changing the population here.)
+Metrics are computed on the 30% test split by default (:func:`holdout_split`),
+consistent with the precision/F1/AUC numbers in the paper. Task 7 adds
+:func:`cv_splits` for the IBM tree/boosting runs: 5-fold stratified CV,
+whose disjoint test folds additionally allow a pooled out-of-fold pass over
+every account (the alert-queue headline numbers) rather than a 20-30% slice.
+``holdout_split`` is not replaced -- the synthetic scripts keep using it.
 ``K`` is an absolute alert count,
 so it can exceed the number of test rows or the number of positives; the
 metric is still written, with ``n_test`` and ``n_pos`` beside it, so that
 e.g. ``R@1000 = 1.0`` off 12 positives is readable as trivial rather than
 impressive.
+
+Folds (task 7)
+--------------
+:func:`cv_splits` returns each fold's train/test indices; :func:`write_folds`
+persists the resulting account/cutoff/target/fold membership to
+``results/<dataset>_folds.csv`` so a later model (task 1's GraphSAGE) can
+read the same partition instead of re-deriving it. In the tidy CSV, the
+``fold`` column is ``0..n_splits-1`` for a per-fold row, ``-1`` for a pooled
+out-of-fold row, and ``NaN`` for a single-split run.
+:func:`aggregate_folds` reduces the per-fold rows to mean/std/min/max plus
+``n_folds_ok``, for whoever builds the manuscript's variance-estimate table.
 
 Ties
 ----
@@ -61,7 +74,7 @@ from sklearn.metrics import (
     precision_score,
     roc_auc_score,
 )
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import StratifiedKFold, train_test_split
 
 # Realistic alert-queue sizes: what a team can actually work through,
 # not a fraction of the node set.
@@ -70,15 +83,28 @@ ALERT_SIZES = [50, 100, 500, 1000]
 # The reproducibility seed used throughout the repository.
 SEED = 1997
 
+# Default fold count for cv_splits (task 7). Distinct from a caller's own
+# "is CV even on" switch -- e.g. gargaml_tree.py's N_FOLDS, which also
+# allows 0 to mean "use holdout_split instead" -- this is just the default
+# n_splits when a caller does want CV.
+CV_FOLDS = 5
+
 # Metrics that already had a per-metric result file before this module
 # existed. Their file names must not change: the visualisation notebooks
 # glob for them.
 LEGACY_METRICS = ["precision", "f1", "AUC_ROC", "AUC_PR"]
 
 # Column order of the tidy result frame.
+#
+# ``fold`` (task 7): 0..n_splits-1 for a per-fold CV row, -1 for a pooled
+# out-of-fold row, NaN for a single-split run (the synthetic scripts,
+# gargaml_IF.py, and gargaml_tree.py itself when its N_FOLDS switch is 0).
+# No caller needs to pass NaN explicitly -- metric_records builds each row
+# from a context dict, so simply not passing ``fold`` already yields NaN
+# once a DataFrame is built from mixed records.
 RECORD_COLUMNS = [
     "dataset", "direction", "model", "features",
-    "cutoff", "target", "seed",
+    "cutoff", "target", "seed", "fold",
     "metric", "K", "value",
     "n_test", "n_pos", "status",
 ]
@@ -101,6 +127,9 @@ LEGACY_MODEL_TOKENS = {
     # No prior file exists for this one -- gargaml_IF.py's IF_AUC never persisted
     # results before this retrofit -- so the token is new, not inherited.
     "gargaml_if_d": "isolationforest",
+    # Task 1's GraphSAGE baseline (scripts/graphsage_baseline.py) -- also a new
+    # token, no legacy file predates it.
+    "graphsage_u": "graphsage",
 }
 
 
@@ -121,6 +150,61 @@ def holdout_split(X, y, test_size=0.3, seed=SEED):
     return train_test_split(
         X, y, test_size=test_size, random_state=seed, stratify=y
     )
+
+
+def cv_splits(X, y, n_splits=CV_FOLDS, seed=SEED):
+    """5-fold (default) stratified CV splits, disjoint and exhaustive over ``y``.
+
+    Returns a **list** of ``(fold, train_idx, test_idx)`` -- eager, not a
+    generator, so a too-small class raises right here, at the call site, the
+    same way ``holdout_split``'s stratification failure already does. The
+    minimum class count is checked explicitly rather than relying on
+    ``StratifiedKFold`` to raise: depending on the sklearn version it may
+    only warn and silently return folds where some class is missing from a
+    fold entirely, which would surface downstream as a confusing model-fit
+    or metric failure instead of the clear "too few positives" skip every
+    other guard in this module uses.
+
+    Unlike repeated random draws of ``holdout_split``, the ``n_splits`` test
+    sets are disjoint and partition ``y`` exactly once each -- that is the
+    property task 7 needs a variance estimate from repeated random splits
+    would not have (their test sets overlap by design). ``seed`` is the
+    ``StratifiedKFold`` shuffle seed, kept at 1997 so the partition is
+    reproducible; it is not varied across repetitions the way a repeated
+    random split would vary it.
+    """
+    _, counts = np.unique(np.asarray(y), return_counts=True)
+    if counts.min() < n_splits:
+        raise ValueError(
+            f"The least populated class has {counts.min()} member(s), fewer than "
+            f"n_splits={n_splits}; cannot stratify into that many folds."
+        )
+
+    skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=seed)
+    return [
+        (fold, train_idx, test_idx)
+        for fold, (train_idx, test_idx) in enumerate(skf.split(X, y))
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Fold persistence
+# ---------------------------------------------------------------------------
+
+# results/<dataset>_folds.csv schema (task 7): one row per account that
+# landed in a test fold for a given (cutoff, target). A (cutoff, target)
+# pair with too few positives for cv_splits simply has no rows here --
+# consumers should treat a missing pair as "not CV-partitioned", not as a
+# fold of 0.
+FOLDS_COLUMNS = ["account", "cutoff", "target", "fold"]
+
+
+def write_folds(records, dataset, results_dir="results"):
+    """Persist the fold partition once, so later models (task 1's GraphSAGE)
+    read it instead of re-deriving it."""
+    path = f"{results_dir}/{dataset}_folds.csv"
+    pd.DataFrame(records, columns=FOLDS_COLUMNS).to_csv(path, index=False)
+    return path
 
 
 # ---------------------------------------------------------------------------
@@ -333,8 +417,19 @@ def metric_records(metrics, status="ok", n_test=np.nan, n_pos=np.nan, **context)
 
 
 def metrics_frame(records):
-    """Tidy DataFrame from the record list, with a stable column order."""
+    """Tidy DataFrame from the record list, with a stable column order.
+
+    ``fold`` (task 7) is guaranteed to exist even when *no* record in this
+    batch passed one -- pandas only fills a column with NaN for rows that
+    are missing a key some other row *did* supply; if every row omits it
+    (a single-split caller, e.g. the synthetic scripts, gargaml_IF.py, or
+    gargaml_tree.py itself in its N_FOLDS=0 mode), the column would not be
+    created at all, and callers that assume it always exists (e.g.
+    write_metric_matrices's ``fold == -1`` check) would raise ``KeyError``.
+    """
     df = pd.DataFrame(records)
+    if "fold" not in df.columns:
+        df["fold"] = np.nan
     columns = [c for c in RECORD_COLUMNS if c in df.columns]
     return df[columns + [c for c in df.columns if c not in columns]]
 
@@ -343,10 +438,16 @@ def metrics_frame(records):
 # Result files
 # ---------------------------------------------------------------------------
 
-def _matrix(df, index_order, column_order):
-    """Pivot one metric into the historical cut-off x pattern matrix."""
+def _matrix(df, index_order, column_order, aggfunc="mean"):
+    """Pivot one metric into the historical cut-off x pattern matrix.
+
+    ``aggfunc`` is "mean" for the historical file and "std" for its task-7
+    companion; with exactly one row per (cutoff, target) cell -- true for
+    every single-split caller -- both aggregations are no-ops on a single
+    value, so this stays byte-identical to the pre-task-7 behaviour there.
+    """
     matrix = df.pivot_table(
-        index="cutoff", columns="target", values="value", dropna=False
+        index="cutoff", columns="target", values="value", dropna=False, aggfunc=aggfunc
     )
     matrix = matrix.reindex(index=index_order, columns=column_order)
     matrix.index.name = None
@@ -355,7 +456,7 @@ def _matrix(df, index_order, column_order):
 
 
 def write_metric_matrices(long_df, dataset, str_directed, suffix="",
-                          results_dir="results"):
+                          results_dir="results", write_std=False):
     """Reproduce the historical per-metric result files from tidy records.
 
     Emits ``<dataset>_<metric>_<model>_<direction><suffix>_combined.csv``
@@ -363,11 +464,33 @@ def write_metric_matrices(long_df, dataset, str_directed, suffix="",
     model-independent ``<dataset>_imbalance_<direction><suffix>_combined.csv``.
     Layout, ordering and NaN gaps match what the pipeline wrote before, so
     notebooks reading these files need no changes.
+
+    Pooled out-of-fold rows (``fold == -1``, task 7) are always excluded
+    before pivoting, unconditionally: a fold column may exist with no ``-1``
+    rows in it (a single-split caller has none), but if it does, averaging
+    it in with the per-fold rows would silently corrupt the historical mean
+    with a sixth, differently-computed value.
+
+    When ``write_std=True`` (task 7's CV runs), also writes
+    ``..._std_combined.csv`` companions with ``aggfunc="std"`` -- same
+    shape, so figures can gain error bars. Default ``False`` keeps every
+    single-split caller's output untouched.
     """
+    if "fold" in long_df.columns:
+        long_df = long_df[long_df["fold"] != -1]
+
     index_order = list(pd.unique(long_df["cutoff"]))
     column_order = list(pd.unique(long_df["target"]))
 
     written = []
+
+    def _write(rows, path):
+        _matrix(rows, index_order, column_order).to_csv(path)
+        written.append(path)
+        if write_std:
+            std_path = path.replace("_combined.csv", "_std_combined.csv")
+            _matrix(rows, index_order, column_order, aggfunc="std").to_csv(std_path)
+            written.append(std_path)
 
     for metric in LEGACY_METRICS:
         rows = long_df[long_df["metric"] == metric]
@@ -381,24 +504,25 @@ def write_metric_matrices(long_df, dataset, str_directed, suffix="",
             token = LEGACY_MODEL_TOKENS[model]
             path = (f"{results_dir}/{dataset}_{metric}_{token}_"
                     f"{str_directed}{suffix}_combined.csv")
-            _matrix(rows[rows["model"] == model], index_order, column_order).to_csv(path)
-            written.append(path)
+            _write(rows[rows["model"] == model], path)
 
     imbalance = long_df[long_df["metric"] == "imbalance"]
     if len(imbalance):
         path = (f"{results_dir}/{dataset}_imbalance_"
                 f"{str_directed}{suffix}_combined.csv")
-        _matrix(imbalance, index_order, column_order).to_csv(path)
-        written.append(path)
+        _write(imbalance, path)
 
     return written
 
 
-def write_metrics(records, dataset, str_directed, suffix="", results_dir="results"):
+def write_metrics(records, dataset, str_directed, suffix="", results_dir="results",
+                   write_std=False):
     """Write the tidy CSV *and* the historical matrices. Returns the frame.
 
     One call at the end of a script replaces the block of per-matrix
-    ``to_csv`` lines each of them used to carry.
+    ``to_csv`` lines each of them used to carry. ``write_std`` is task 7's
+    switch for also emitting the fold-std companion matrices; see
+    :func:`write_metric_matrices`.
     """
     long_df = metrics_frame(records)
 
@@ -407,8 +531,33 @@ def write_metrics(records, dataset, str_directed, suffix="", results_dir="result
     print(f"  tidy metrics -> {tidy_path}")
 
     written = write_metric_matrices(
-        long_df, dataset, str_directed, suffix=suffix, results_dir=results_dir
+        long_df, dataset, str_directed, suffix=suffix, results_dir=results_dir,
+        write_std=write_std,
     )
     print(f"  wrote {len(written)} result CSVs in the historical format")
 
     return long_df
+
+
+def aggregate_folds(long_df):
+    """Mean/std/min/max across CV folds, plus ``n_folds_ok`` (task 7).
+
+    Grouped on the identifying columns other than ``fold``/``seed``/
+    ``n_test``/``n_pos``/``status``, over rows with ``fold >= 0`` only --
+    this excludes both NaN (single-split) rows and the ``-1`` pooled
+    out-of-fold row, so a pooled value never gets averaged in as a sixth
+    fold. ``n_folds_ok`` counts folds with ``status == "ok"``, not folds
+    present, so a cutoff/target cell where only 3 of 5 folds had enough
+    positives to fit announces that rather than silently averaging 3
+    numbers as if nothing were missing.
+    """
+    keys = ["dataset", "direction", "model", "features", "cutoff", "target", "metric", "K"]
+    per_fold = long_df[long_df["fold"] >= 0]
+
+    agg = per_fold.groupby(keys, dropna=False)["value"].agg(["mean", "std", "min", "max"])
+
+    ok = per_fold[per_fold["status"] == "ok"]
+    n_ok = ok.groupby(keys, dropna=False)["fold"].nunique()
+    agg["n_folds_ok"] = n_ok.reindex(agg.index).fillna(0).astype(int)
+
+    return agg.reset_index()

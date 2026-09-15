@@ -7,6 +7,7 @@ DIR = "./"
 os.chdir(DIR)
 sys.path.append(DIR)
 
+import numpy as np
 import pandas as pd
 
 from src.data.pattern_construction import define_ML_labels, summarise_ML_labels, combine_patterns_GARGAML
@@ -15,10 +16,14 @@ from src.data.graph_construction import construct_IBM_graph
 from src.utils.graph_processing import graph_community
 from src.utils.evaluation import (
     SEED,
+    cv_splits,
     evaluate_model,
+    evaluate_scores,
     holdout_split,
     metric_records,
+    model_scores,
     nan_metrics,
+    write_folds,
     write_metrics,
 )
 from src.utils.features import (
@@ -42,6 +47,15 @@ from pickle import dump
 # feature config, so they live here rather than being re-declared per config.
 CUT_OFFS = [0.1, 0.2, 0.3, 0.5, 0.9]
 TARGET_COLUMNS = ['Is Laundering', 'FAN-OUT', 'FAN-IN', 'GATHER-SCATTER', 'SCATTER-GATHER', 'CYCLE', 'RANDOM', 'BIPARTITE', 'STACK']
+
+# Task 7: set to 0 to reproduce the original published single 70/30 split
+# (Tables 10-11) -- holdout_split, one fit per model, no fold column, legacy
+# files unchanged. Set to 5 (or any >=2) to run 5-fold stratified CV instead:
+# cv_splits, a pooled out-of-fold pass per model, and the fold-std companion
+# matrices. Both modes write to the same legacy filenames, so switching this
+# and rerunning overwrites the other mode's output -- copy results/ aside
+# first if you want to keep both on disk at once.
+N_FOLDS = 5
 
 def gargaml_tree(X, y, save = False, save_path = "results/model_tree.pkl"):
     # random_state is required, not cosmetic: sklearn permutes features at every
@@ -132,14 +146,67 @@ def data_preparation(dataset, feature_cols, directed, score_type, G_reduced = No
 
     return laundering_combined
 
-def data_split(laundering_combined, gargaml_columns, target, cutoff, seed=SEED):
-    X_df = laundering_combined[gargaml_columns]
-    rel_labels = laundering_combined[target]
-    y = (rel_labels>cutoff)*1
+def _fit_and_record(X_train, y_train, X_test, y_test, models, context):
+    """Fit every model on one train/test partition and return its records.
 
-    X_train, X_test, y_train, y_test = holdout_split(X_df, y, seed=seed)
+    Shared by both of run_config's modes (task 7): the single 70/30 split
+    (N_FOLDS=0) calls this once per (cutoff, target); 5-fold CV calls it once
+    per fold. Also returns each model's test-set scores/predictions, indexed
+    by account -- needed to pool the CV folds into one out-of-fold pass,
+    harmlessly unused (but cheap) when N_FOLDS=0.
+    """
+    n_test = len(y_test)
+    n_pos = int(y_test.sum())
 
-    return X_train, X_test, y_train, y_test
+    records = metric_records(
+        {"imbalance": y_train.mean()}, n_test=n_test, n_pos=n_pos, model="", **context
+    )
+
+    scores, preds = {}, {}
+    for model_key, fit_model in models:
+        try: # If too few labels, the model will not work. The cell is reported as NaN, with the reason
+            clf = fit_model(X_train, y_train)
+            metrics = evaluate_model(clf, X_test, y_test)
+            scores[model_key] = pd.Series(model_scores(clf, X_test), index=X_test.index)
+            preds[model_key] = pd.Series(clf.predict(X_test), index=X_test.index)
+            status = "ok"
+        except Exception as exc:
+            print("    "+model_key+" skipped: "+repr(exc))
+            metrics = nan_metrics()
+            status = "skipped: "+str(exc)
+
+        records += metric_records(
+            metrics, status=status, n_test=n_test, n_pos=n_pos, model=model_key, **context
+        )
+
+    return records, scores, preds
+
+
+def write_fold_partition(laundering_combined, dataset, cut_offs, targets, n_splits, seed=SEED):
+    """Persist the N_FOLDS partition once (task 7).
+
+    The split for a given (cutoff, target) depends only on the label vector,
+    ``n_splits`` and the seed -- not on which feature config or direction
+    trains on it -- so this is called once from main(), and run_config's own
+    cv_splits calls reproduce the exact same partition deterministically
+    without needing to share any state with this function. ``n_splits`` must
+    be the same N_FOLDS run_config is using, or the persisted file would
+    silently describe a different partition than the one actually trained on.
+    """
+    rows = []
+    for cutoff in cut_offs:
+        for target in targets:
+            y = (laundering_combined[target] > cutoff).astype(int)
+            try:
+                splits = cv_splits(y, y, n_splits=n_splits, seed=seed)  # X unused beyond its length
+            except ValueError as exc:
+                print("    no folds for "+target+" @"+str(cutoff)+": "+repr(exc))
+                continue
+            for fold, _, test_idx in splits:
+                for account in y.index[test_idx]:
+                    rows.append(dict(account=account, cutoff=cutoff, target=target, fold=fold))
+
+    return write_folds(rows, dataset)
 
 def run_config(laundering_combined, dataset, directed, config, seed=SEED):
     """Train and evaluate both models on one feature config (task 3).
@@ -184,39 +251,68 @@ def run_config(laundering_combined, dataset, directed, config, seed=SEED):
                 seed = seed,
             )
 
-            try:
-                X_train, X_test, y_train, y_test = data_split(laundering_combined, gargaml_columns, target, cutoff, seed=seed)
-            except Exception as exc: # Too few labels to even split: no models for this cell
-                print("    no split: "+repr(exc))
-                records += metric_records({"imbalance": 0.0}, status = "skipped: "+str(exc), model = "", **context)
-                for model_key, _ in models:
-                    records += metric_records(nan_metrics(), status = "skipped: "+str(exc), model = model_key, **context)
+            X_df = laundering_combined[gargaml_columns]
+            y = (laundering_combined[target] > cutoff).astype(int)
+
+            if N_FOLDS == 0: # original published setup: single 70/30 split
+                try:
+                    X_train, X_test, y_train, y_test = holdout_split(X_df, y, seed=seed)
+                except Exception as exc: # Too few labels to even split: no models for this cell
+                    print("    no split: "+repr(exc))
+                    records += metric_records({"imbalance": 0.0}, status = "skipped: "+str(exc), model = "", **context)
+                    for model_key, _ in models:
+                        records += metric_records(nan_metrics(), status = "skipped: "+str(exc), model = model_key, **context)
+                    continue
+
+                fold_records, _, _ = _fit_and_record(X_train, y_train, X_test, y_test, models, context)
+                records += fold_records
                 continue
 
-            n_test = len(y_test)
-            n_pos = int(sum(y_test))
+            # Task 7: 5-fold (or N_FOLDS-fold) stratified CV instead.
+            try:
+                splits = cv_splits(X_df, y, n_splits=N_FOLDS, seed=seed)
+            except ValueError as exc: # Too few positives for N_FOLDS-fold CV
+                print("    no CV split: "+repr(exc))
+                records += metric_records({"imbalance": 0.0}, status = "skipped: "+str(exc), model = "", fold = np.nan, **context)
+                for model_key, _ in models:
+                    records += metric_records(nan_metrics(), status = "skipped: "+str(exc), model = model_key, fold = np.nan, **context)
+                continue
 
-            records += metric_records(
-                {"imbalance": sum(y_train)/len(y_train)},
-                n_test = n_test, n_pos = n_pos, model = "", **context
+            oof_scores = {model_key: pd.Series(np.nan, index=X_df.index) for model_key, _ in models}
+            oof_preds = {model_key: pd.Series(np.nan, index=X_df.index) for model_key, _ in models}
+
+            for fold, train_idx, test_idx in splits:
+                X_train, X_test = X_df.iloc[train_idx], X_df.iloc[test_idx]
+                y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
+
+                fold_records, scores, preds = _fit_and_record(
+                    X_train, y_train, X_test, y_test, models, dict(context, fold=fold)
+                )
+                records += fold_records
+                for model_key, _ in models:
+                    if model_key in scores:
+                        oof_scores[model_key].loc[X_test.index] = scores[model_key]
+                        oof_preds[model_key].loc[X_test.index] = preds[model_key]
+
+            # Pooled out-of-fold pass (fold=-1): one row per model, ranked over
+            # the whole population -- the alert-queue headline numbers task 2's
+            # ranking metrics actually want, not a 20% slice (see task 7's "K
+            # population" note).
+            pooled_context = dict(context, fold=-1)
+            for model_key, _ in models:
+                scores, preds = oof_scores[model_key], oof_preds[model_key]
+                if scores.isna().any():
+                    metrics = nan_metrics()
+                    status = "skipped: incomplete out-of-fold coverage"
+                else:
+                    metrics = evaluate_scores(y.values, scores.values, y_pred=preds.values)
+                    status = "ok"
+                records += metric_records(
+                    metrics, status = status, n_test = len(y), n_pos = int(y.sum()),
+                    model = model_key, **pooled_context
                 )
 
-            for model_key, fit_model in models:
-                try: # If too few labels, the model will not work. The cell is reported as NaN, with the reason
-                    clf = fit_model(X_train, y_train)
-                    metrics = evaluate_model(clf, X_test, y_test)
-                    status = "ok"
-                except Exception as exc:
-                    print("    "+model_key+" skipped: "+repr(exc))
-                    metrics = nan_metrics()
-                    status = "skipped: "+str(exc)
-
-                records += metric_records(
-                    metrics, status = status, n_test = n_test, n_pos = n_pos,
-                    model = model_key, **context
-                    )
-
-    return write_metrics(records, dataset, str_directed, suffix=suffix)
+    return write_metrics(records, dataset, str_directed, suffix=suffix, write_std=(N_FOLDS >= 2))
 
 def main():
     dataset = "HI-Small"
@@ -228,7 +324,16 @@ def main():
     # once for both passes instead of once per data_preparation call.
     G_reduced = reduced_graph(dataset) if any(needs_neighbourhood(c) for c in configs) else None
 
+    if N_FOLDS >= 2:
+        print("Transductive "+str(N_FOLDS)+"-fold CV (task 7): neighbour-score/degree "
+              "summary features are computed on the full graph before folding; the "
+              "temporal/inductive split stays deferred to discussion (R2-M6).")
+    else:
+        print("Single 70/30 holdout split (original published setup; task 7's CV is "
+              "off -- set N_FOLDS >= 2 in this script to enable it).")
+
     done = set() # direction-free configs already run; see is_direction_free
+    fold_partition_written = False
 
     for directed in [False, True]:
         str_directed = "directed" if directed else "undirected"
@@ -251,6 +356,14 @@ def main():
             dataset, all_feature_columns(todo, directed), directed, score_type,
             G_reduced = G_reduced
             )
+
+        # The account population and its order are identical regardless of
+        # direction (see write_fold_partition), so the partition only needs
+        # writing once, from whichever laundering_combined is built first.
+        if N_FOLDS >= 2 and not fold_partition_written:
+            path = write_fold_partition(laundering_combined, dataset, CUT_OFFS, TARGET_COLUMNS, N_FOLDS)
+            print("  folds -> "+path)
+            fold_partition_written = True
 
         for config in todo:
             run_config(laundering_combined, dataset, directed, config)
