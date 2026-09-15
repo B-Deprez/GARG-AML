@@ -41,6 +41,10 @@ MODEL_DISPLAY_NAMES: dict[str, str] = {
     # 9 directed block-density measures unconditionally, so there is no _u counterpart
     # to add until that script itself supports the undirected measure columns.
     "gargaml_if_d":    "GARG-AML Isolation Forest",
+    # GraphSAGE baseline (task 1, scripts/graphsage_baseline.py): undirected only so
+    # far, matching the spec's primary run against the stronger undirected GARG-AML
+    # score. Never fed GARG-AML scores or block measures -- see that script.
+    "graphsage_u":     "GraphSAGE",
 }
 
 # Task-3 feature configs (src/utils/features.py) are ablations of the *same*
