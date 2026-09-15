@@ -132,6 +132,17 @@ parallelise via `multiprocessing.Pool`, capped at `min(4, cpu_count() // 2)` wor
 is not reproducible run to run; any tree result written before that fix is not comparable). Keep these fixed when comparing runs. Task 7's 5-fold CV keeps 1997
 as the `StratifiedKFold` shuffle seed, so the partition is reproducible.
 
+**Testing changes to the CV pipeline: use `N_FOLDS = 2`, not 5.** `gargaml_tree.py`'s
+`N_FOLDS` module constant (0 = original single 70/30 split, ≥2 = that many stratified
+folds) accepts any value ≥2 and produces a genuine, correctly-stratified partition either
+way — it is not specific to 5. A real HI-Small run showed 5-fold CV can take tens of
+minutes to hours depending on the model and sweep size, so when verifying a code change
+(not producing paper numbers), set `N_FOLDS = 2` and keep `CUT_OFFS`/`TARGET_COLUMNS` to
+a small subset first. `scripts/graphsage_baseline.py` reads whichever fold count is
+actually present in `results/<dataset>_folds.csv` — it has no `N_FOLDS` of its own to
+keep in sync, so regenerating that file with `gargaml_tree.py`'s `N_FOLDS = 2` is enough
+to make a GraphSAGE test run fast too.
+
 ---
 
 ## 3. The core idea — read before touching `src/methods/`
