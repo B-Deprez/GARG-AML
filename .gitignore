@@ -15,7 +15,9 @@
 #     too large for git and must be downloaded from Kaggle (see README).
 #   * Synthetic graphs are regenerated on demand by
 #     src/data/synthetic_smurfing.py, so they are reproducible, not source.
-data/
+# Anchored to the repo root so it only matches the top-level data/ folder, not
+# the tracked source package src/data/.
+/data/
 
 # --- Generated results & artifacts -----------------------------------------
 # Score matrices, timing logs, performance CSVs and the decision-tree plots are
