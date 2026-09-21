@@ -62,10 +62,50 @@ from pickle import dump
 #            large bank and the only setting with enough positives to evaluate
 # The appendix comparison itself is scripts/partial_observability.py; these
 # entries exist for running the ordinary tree/boosting pipeline on a view.
-DATASETS = ["HI-Small", "HI-Small_bank012", "HI-Small_banktop50"]
+#
+# Ordered smallest first, matching gargaml_undirected.py / gargaml_directed.py:
+# 12,180 nodes for bank 012, 164,822 for top50, 515,080 for HI-Small,
+# 2,054,390 for LI-Large. Every entry OVERWRITES its results/ files in place,
+# and a dataset whose stage-1 measures are missing is skipped rather than
+# failing (see available_directions), so an interrupted or trimmed run still
+# leaves a usable results/. Comment out what you do not need.
+#
+# LI-Large is the multi-hour job and needs the VSC envelope (16 h, 200 GB):
+# reduced_graph() builds a 2M-node / 176M-edge NetworkX graph and runs Louvain
+# on it before a single model is fitted. It is in this list because Tables
+# 10-11 have an LI-Large column: leaving it out would publish HI-Small under
+# task 7's 5-fold CV beside LI-Large numbers still coming from the original
+# single 70/30 split *and* from before task 2's predict_proba fix, which is a
+# table whose two halves are not the same quantity.
+DATASETS = ["HI-Small_bank012", "HI-Small_banktop50", "HI-Small", "LI-Large"]
 
+# The default sweep: every cut-off and every pattern.
 CUT_OFFS = [0.1, 0.2, 0.3, 0.5, 0.9]
 TARGET_COLUMNS = ['Is Laundering', 'FAN-OUT', 'FAN-IN', 'GATHER-SCATTER', 'SCATTER-GATHER', 'CYCLE', 'RANDOM', 'BIPARTITE', 'STACK']
+
+# Per-dataset reductions of that sweep, keyed by the *underlying* dataset so a
+# task-5 view inherits its base's settings (same idiom as the DATASETS dict in
+# graphsage_baseline.py). This is the sanctioned, logged place for task 7's
+# LI-Large reduction -- the full grid is 5 cut-offs x 9 targets x 2 models x 4
+# feature configs = 360 fits, and 1800 under 5-fold CV, which LI-Large will not
+# carry. Restricting it to the paper's headline cut-offs (0.1 / 0.5 / 0.9)
+# matches what graphsage_baseline.py already does there, so the two models stay
+# comparable cell for cell. Record a reduction here rather than trimming the
+# module constants, which would silently shrink HI-Small's grid too.
+DATASET_SETTINGS = {
+    "LI-Large": dict(cut_offs=[0.1, 0.5, 0.9]),
+}
+
+
+def dataset_settings(dataset):
+    """The (cut_offs, targets) sweep for ``dataset``; see DATASET_SETTINGS.
+
+    Falls back to the full default sweep, and resolves a task-5 view
+    ("HI-Small_bank012") to its base dataset's entry.
+    """
+    overrides = DATASET_SETTINGS.get(parse_view(dataset)[0], {})
+    return (overrides.get("cut_offs", CUT_OFFS),
+            overrides.get("targets", TARGET_COLUMNS))
 
 # Task 7: set to 0 to reproduce the original published single 70/30 split
 # (Tables 10-11) -- holdout_split, one fit per model, no fold column, legacy
@@ -264,21 +304,34 @@ def write_fold_partition(laundering_combined, dataset, cut_offs, targets, n_spli
 
     return write_folds(rows, dataset)
 
-def run_config(laundering_combined, dataset, directed, config, seed=SEED):
+def run_config(laundering_combined, dataset, directed, config, seed=SEED,
+               cut_offs=None, targets=None):
     """Train and evaluate both models on one feature config (task 3).
 
     The feature config is the only thing that varies: the split, the
     cut-off/target sweep and the estimators are identical, which is what
     makes the ablation readable. Results go to the ``config``-specific
     suffix, so the published ``full`` files keep their historical names.
+
+    ``cut_offs`` / ``targets`` default to whatever
+    :func:`dataset_settings` resolves for ``dataset``, so a caller that
+    does not care (scripts/gargaml_tree_blocks.py) picks up a per-dataset
+    reduction automatically instead of silently running the full grid.
     """
     str_directed = "directed" if directed else "undirected"
     suffix = config_suffix(config)
     gargaml_columns = feature_columns(config, directed)
 
+    default_cut_offs, default_targets = dataset_settings(dataset)
+    cut_offs = default_cut_offs if cut_offs is None else cut_offs
+    targets = default_targets if targets is None else targets
+
     print("\n=== "+dataset+" ("+str_directed+"), features: "+config+" ===")
     print("  models: "+", ".join(pretty_config(gargaml_key(v, directed), config) for v in ["tree", "boost"]))
     print("  features ("+str(len(gargaml_columns))+"): "+str(gargaml_columns))
+    print("  sweep: "+str(len(cut_offs))+" cut-offs x "+str(len(targets))+" targets"
+          +(" (reduced; see DATASET_SETTINGS)"
+            if (cut_offs, targets) != (CUT_OFFS, TARGET_COLUMNS) else ""))
 
     # Persist the feature schema for the appendix (task 10).
     schema_path = "results/"+dataset+"_"+str_directed+suffix+"_feature_schema.csv"
@@ -292,10 +345,21 @@ def run_config(laundering_combined, dataset, directed, config, seed=SEED):
 
     records = []
 
+    # Iterate the *full* default grid and skip what this dataset's sweep
+    # leaves out, rather than iterating the reduced sweep directly. Two
+    # reasons, both about the legacy matrices:
+    #   * write_metric_matrices takes its row/column order from the values
+    #     actually present, so a reduced sweep would emit a 3x9 matrix where
+    #     every other dataset emits 5x9 -- and VisualisationResults.ipynb
+    #     indexes those files with df.loc[cut_off][pattern] over the full
+    #     cut-off list, so the missing rows would be a KeyError, not a
+    #     smaller table.
+    #   * a cell that was never attempted is a gap like any other, and this
+    #     repo reports gaps instead of dropping them. It goes through the
+    #     same nan_metrics() path as a too-few-positives cell, with a status
+    #     that says which of the two it was.
     for cutoff in CUT_OFFS:
         for target in TARGET_COLUMNS:
-            print(cutoff, target)
-
             context = dict(
                 dataset = dataset,
                 direction = str_directed,
@@ -306,6 +370,18 @@ def run_config(laundering_combined, dataset, directed, config, seed=SEED):
                 target = target,
                 seed = seed,
             )
+
+            if cutoff not in cut_offs or target not in targets:
+                reason = "skipped: not in this dataset's sweep (DATASET_SETTINGS)"
+                fold_ctx = {} if N_FOLDS == 0 else dict(fold = np.nan)
+                records += metric_records({"imbalance": np.nan}, status = reason,
+                                          model = "", **fold_ctx, **context)
+                for model_key, _ in models:
+                    records += metric_records(nan_metrics(), status = reason,
+                                              model = model_key, **fold_ctx, **context)
+                continue
+
+            print(cutoff, target)
 
             X_df = laundering_combined[gargaml_columns]
             y = (laundering_combined[target] > cutoff).astype(int)
@@ -379,6 +455,12 @@ def run_dataset(dataset):
 
     configs = list(FEATURE_CONFIGS) # full (published), blocks, topology, all
 
+    # Resolved once and threaded everywhere, so the persisted fold partition
+    # covers exactly the (cutoff, target) cells that will be trained on. A
+    # partition written over the full grid while the models run a reduced one
+    # would describe folds nothing reads, and GraphSAGE reads this file.
+    cut_offs, targets = dataset_settings(dataset)
+
     # Stage 1 must have run on this dataset name -- including on a bank view's
     # name, which is a dataset of its own. Check before building the graph:
     # that plus Louvain is where this script's time goes, and there is no
@@ -403,6 +485,13 @@ def run_dataset(dataset):
     # The reduced graph does not depend on the direction, so it is built
     # once for both passes instead of once per data_preparation call.
     G_reduced = reduced_graph(dataset) if any(needs_neighbourhood(c) for c in configs) else None
+
+    if (cut_offs, targets) != (CUT_OFFS, TARGET_COLUMNS):
+        print("Reduced sweep for "+dataset+" (DATASET_SETTINGS): "
+              +str(len(cut_offs))+" of "+str(len(CUT_OFFS))+" cut-offs, "
+              +str(len(targets))+" of "+str(len(TARGET_COLUMNS))+" targets. The "
+              "omitted cells are written as NaN with a 'not in this dataset's "
+              "sweep' status, not dropped.")
 
     if N_FOLDS >= 2:
         print("Transductive "+str(N_FOLDS)+"-fold CV (task 7): neighbour-score/degree "
@@ -441,12 +530,13 @@ def run_dataset(dataset):
         # direction (see write_fold_partition), so the partition only needs
         # writing once, from whichever laundering_combined is built first.
         if N_FOLDS >= 2 and not fold_partition_written:
-            path = write_fold_partition(laundering_combined, dataset, CUT_OFFS, TARGET_COLUMNS, N_FOLDS)
+            path = write_fold_partition(laundering_combined, dataset, cut_offs, targets, N_FOLDS)
             print("  folds -> "+path)
             fold_partition_written = True
 
         for config in todo:
-            run_config(laundering_combined, dataset, directed, config)
+            run_config(laundering_combined, dataset, directed, config,
+                       cut_offs=cut_offs, targets=targets)
             if is_direction_free(config):
                 done.add(config)
 

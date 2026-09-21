@@ -65,6 +65,8 @@ than let an arbitrary ordering pass silently.
 
 from __future__ import annotations
 
+import os
+
 import numpy as np
 import pandas as pd
 
@@ -130,6 +132,12 @@ LEGACY_MODEL_TOKENS = {
     # Task 1's GraphSAGE baseline (scripts/graphsage_baseline.py) -- also a new
     # token, no legacy file predates it.
     "graphsage_u": "graphsage",
+    # The base GARG-AML scores (scripts/distribution_scores.py) are deliberately
+    # ABSENT. That script writes its tidy frame with write_matrices=False,
+    # because its published numbers live in results_performance_IBM_*.txt and it
+    # has no matrix format to reproduce. Adding tokens here would not make those
+    # files appear -- it would only remove the guard if someone later switched
+    # that call to write matrices nothing reads. Leave them out.
 }
 
 
@@ -205,6 +213,42 @@ def write_folds(records, dataset, results_dir="results"):
     path = f"{results_dir}/{dataset}_folds.csv"
     pd.DataFrame(records, columns=FOLDS_COLUMNS).to_csv(path, index=False)
     return path
+
+
+def folds_path(dataset, results_dir="results"):
+    """Where :func:`write_folds` put ``dataset``'s partition."""
+    return f"{results_dir}/{dataset}_folds.csv"
+
+
+def read_folds(dataset, results_dir="results"):
+    """The persisted partition for ``dataset``, or ``None`` if there is none.
+
+    Returning ``None`` rather than raising is deliberate: a consumer of the
+    folds is expected to have a sensible un-folded mode. The synthetic
+    datasets are never CV-partitioned at all (task 7 scopes CV to the IBM
+    data), and an IBM run made with ``N_FOLDS = 0`` writes no partition
+    either -- in both cases the right behaviour is to evaluate the full
+    population and say so, not to fail. Callers that genuinely cannot
+    proceed without folds (scripts/graphsage_baseline.py) should check for
+    ``None`` and raise their own message naming how to produce the file.
+    """
+    path = folds_path(dataset, results_dir)
+    if not os.path.exists(path):
+        return None
+    return pd.read_csv(path)
+
+
+def fold_assignments(folds_df, cutoff, target):
+    """``{fold: [account, ...]}`` for one (cut-off, target) cell.
+
+    Empty when the partition has no rows for that pair -- task 7 skips a
+    cell whose positives are too few for ``cv_splits``, so a missing pair
+    means "not CV-partitioned", not "a fold of zero accounts".
+    """
+    if folds_df is None:
+        return {}
+    rows = folds_df[(folds_df["cutoff"] == cutoff) & (folds_df["target"] == target)]
+    return {int(f): group["account"].tolist() for f, group in rows.groupby("fold")}
 
 
 # ---------------------------------------------------------------------------
@@ -516,19 +560,32 @@ def write_metric_matrices(long_df, dataset, str_directed, suffix="",
 
 
 def write_metrics(records, dataset, str_directed, suffix="", results_dir="results",
-                   write_std=False):
+                   write_std=False, write_matrices=True):
     """Write the tidy CSV *and* the historical matrices. Returns the frame.
 
     One call at the end of a script replaces the block of per-matrix
     ``to_csv`` lines each of them used to carry. ``write_std`` is task 7's
     switch for also emitting the fold-std companion matrices; see
     :func:`write_metric_matrices`.
+
+    ``write_matrices=False`` writes the tidy frame only. It exists for a
+    caller whose model has **no** historical matrix format to reproduce --
+    the base GARG-AML score in scripts/distribution_scores.py, whose
+    published numbers live in ``results_performance_IBM_<direction>.txt``
+    instead. Emitting matrices there would create files no notebook opens,
+    which is exactly what :data:`LEGACY_MODEL_TOKENS` raises to prevent.
+    It also sidesteps a real hazard: that caller mixes per-fold rows with a
+    full-population row, and ``_matrix``'s ``aggfunc="mean"`` would silently
+    average the two kinds together into one cell.
     """
     long_df = metrics_frame(records)
 
     tidy_path = f"{results_dir}/{dataset}_{str_directed}{suffix}_metrics.csv"
     long_df.to_csv(tidy_path, index=False)
     print(f"  tidy metrics -> {tidy_path}")
+
+    if not write_matrices:
+        return long_df
 
     written = write_metric_matrices(
         long_df, dataset, str_directed, suffix=suffix, results_dir=results_dir,
