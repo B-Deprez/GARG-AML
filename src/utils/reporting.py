@@ -609,6 +609,77 @@ def severance_table(results_dir="results", latex=True):
     return table
 
 
+# The two shapes GARG-AML is built to find, so they lead the pattern-splitting
+# tables; "ALL" is the pooled row and goes last.
+GARGAML_TARGETS = ["GATHER-SCATTER", "SCATTER-GATHER"]
+
+# Column of the pattern-splitting summary -> (caption phrase, decimals).
+SPLITTING_COLUMNS = {
+    "pct_destroyed": ("laundering attempts left undetectable", 1),
+    "mean_path_survival": ("of each attempt's two-hop paths surviving", 1),
+    "pct_split": ("attempts whose accounts span more than one community", 1),
+    "mean_edge_survival": ("of each attempt's own edges surviving", 1),
+}
+
+
+def pattern_splitting_table(results_dir="results", column="pct_destroyed",
+                            latex=True):
+    """P4 / R2-M3: what the Louvain step destroys, by pattern type.
+
+    Rows are (dataset, pattern type), columns the resolution, so the
+    reviewer's claim -- "a pattern straddling two communities is destroyed"
+    -- can be read straight off. Built from
+    ``results/pattern_splitting_summary.csv``, which
+    ``scripts/pattern_splitting.py`` writes.
+
+    ``pct_destroyed`` is the default and the headline: the share of attempts
+    that had a source-mule-target path and no longer do. It is **NaN for
+    one-hop pattern types** (FAN-OUT, FAN-IN), which have no two-hop
+    structure to lose, and those cells render as ``--`` rather than as a
+    zero that would read like "nothing was destroyed".
+
+    Read it beside :func:`severance_table`. Edges severed says what the
+    pre-processing costs; this says what it costs *us*, and the two do not
+    move together -- the pooled destruction rate is nearly flat in the
+    resolution while the per-pattern rates move in opposite directions.
+    """
+    if column not in SPLITTING_COLUMNS:
+        raise KeyError(f"Unknown splitting column {column!r}; expected one of "
+                       f"{sorted(SPLITTING_COLUMNS)}.")
+
+    path = os.path.join(results_dir, "pattern_splitting_summary.csv")
+    if not os.path.exists(path):
+        return pd.DataFrame()
+
+    summary = pd.read_csv(path)
+    if summary.empty or column not in summary.columns:
+        return pd.DataFrame()
+
+    summary["resolution"] = [v if v == "off" else float(v)
+                             for v in summary["resolution"]]
+
+    table = summary.pivot_table(index=["dataset", "pattern_type"],
+                                columns="resolution", values=column,
+                                aggfunc="last", dropna=False)
+    table = table.reindex(columns=_resolution_order(table.columns))
+
+    # Targets first, then the other types alphabetically, then the pooled row.
+    types = [t for t in table.index.get_level_values(1).unique()]
+    order = (GARGAML_TARGETS
+             + sorted(t for t in types if t not in GARGAML_TARGETS and t != "ALL")
+             + (["ALL"] if "ALL" in types else []))
+    table = table.reindex(index=[t for t in order if t in types], level=1)
+
+    table = table.apply(lambda col: col.map(
+        lambda v: "--" if pd.isna(v)
+        else format_cell(v, digits=SPLITTING_COLUMNS[column][1], latex=latex,
+                         basis="single")))
+    table.columns = [("no Louvain" if c == "off" else
+                      f"r={c:g}" + (" (published)" if c == DEFAULT_RESOLUTION else ""))
+                     for c in table.columns]
+    return table
+
+
 def variance_table(df, dataset, metric="AUC_PR", n_folds=None, latex=True):
     """P7 / R2-M6: the fold spread, and how many folds each mean rests on.
 

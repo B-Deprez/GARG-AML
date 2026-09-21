@@ -64,11 +64,12 @@ python scripts/gargaml_tree.py         # stage 2: train + evaluate -> results/
 | Synthetic network illustrations | `notebooks/VisualisationNetwork.ipynb` | `data/combined_synthetic_networks.pdf` |
 | Worked toy example (Appendix A) | `notebooks/toyexample.ipynb` | inline figures |
 | Edges severed by the Louvain filter | `notebooks/LouvainEdgeSeverance.ipynb` | inline table |
+| Laundering patterns destroyed by the Louvain step | `scripts/pattern_splitting.py` | `results/<dataset>_pattern_splitting.csv` (one row per laundering attempt and resolution: communities spanned, edge survival, 2-path survival), `..._summary.csv` by pattern type, and the pooled `results/pattern_splitting_summary.csv` |
 | Louvain sensitivity sweep (resolution, and no Louvain at all) | `scripts/gargaml_undirected.py`, `scripts/gargaml_directed.py`, `scripts/gargaml_tree.py`, run on the `_res<r>` / `_nolouvain` dataset names | `results/louvain_severance.csv` (edges severed per dataset and setting) plus the usual per-dataset measure and metric files under those names |
 | Partial-observability appendix: score on the full graph vs a bank's view | `scripts/partial_observability.py` | `results/<view>_partial_observability_accounts.csv`, `..._metrics.csv` |
 | Appendix tables and figures | `notebooks/BankObservability.ipynb` | `results/appendix_*.csv`, `results/appendix_*.pdf` |
 | Directed-vs-undirected diagnosis | `scripts/directed_diagnosis.py` | `results/<dataset>_directed_diagnosis.csv` (per node: level census, reciprocal census, five score variants), `..._summary.csv` (means by ground-truth class and structural role), `..._directed_diagnosis_metrics.csv` (each variant through the shared metrics), and the pooled `results/directed_diagnosis_{summary,metrics}.csv` |
-| Revision tables: results, ablation, alert queue, fold variance, cost, Louvain sweep and edge severance | `scripts/build_tables.py` | `results/table_*.tex` and a `.csv` twin of each, plus `results/table_coverage.csv` saying which model/config combinations are on disk and whether they predate the cross-validation |
+| Revision tables: results, ablation, alert queue, fold variance, cost, Louvain sweep, edge severance and pattern splitting | `scripts/build_tables.py` | `results/table_*.tex` and a `.csv` twin of each, plus `results/table_coverage.csv` saying which model/config combinations are on disk and whether they predate the cross-validation |
 | Tree / boosting / GraphSAGE under a bank view | the model scripts above, run on a view name | the same files, under `results/<dataset>_bank<b>_*` |
 
 FlowScope and AutoAudit are not run from this repository (see *Experimental
@@ -185,6 +186,7 @@ src/
     naming.py                 # canonical model names for tables and figures
     hyperparameters.py        # hyperparameter provenance for every fitted model
     reporting.py              # tidy metrics -> paper tables (fold-aware)
+    pattern_splitting.py      # do laundering patterns survive the Louvain filter?
 
 scripts/                      # runnable entry points (run from the repo root)
   gargaml_directed.py         #   compute directed measures on IBM data
@@ -196,6 +198,7 @@ scripts/                      # runnable entry points (run from the repo root)
   gargaml_link_label.py       #   edge-/link-level labelling
   distribution_scores.py      #   score-distribution analysis
   build_tables.py             #   tidy metrics -> LaTeX/CSV tables for the paper
+  pattern_splitting.py        #   which laundering patterns Louvain destroys
   directed_diagnosis.py       #   directed-vs-undirected diagnosis on the
                               #   synthetic grid (and sampled HI-Small)
   nbstrip.py                  #   repository hygiene, not part of the pipeline

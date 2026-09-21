@@ -103,6 +103,63 @@ def create_AML_labels(path= "data/HI-Small_Patterns.txt"):
 
     return df_patterns
 
+# Column positions in a transactions line of *_Patterns.txt. The lines are
+# verbatim rows of the matching *_Trans.csv, so these are that file's columns:
+# Timestamp, From Bank, Account, To Bank, Account.1, Amount Received,
+# Receiving Currency, Amount Paid, Payment Currency, Payment Format,
+# Is Laundering.
+PATTERN_FROM_ACCOUNT = 2
+PATTERN_TO_ACCOUNT = 4
+
+
+def pattern_instances(path="data/HI-Small_Patterns.txt"):
+    """One row per transaction, tagged with the laundering attempt it belongs to.
+
+    :func:`create_AML_labels` reads the same file but flattens it: it tracks
+    the ``BEGIN``/``END`` markers only to know which pattern *type* column to
+    set, and the attempt boundaries are gone from its output. That is all the
+    labelling pipeline needs, and it is not enough for the task-4
+    split-pattern diagnostic, which has to ask whether the accounts of **one**
+    attempt stayed in one Louvain community. So this parser keeps the
+    boundary as an ``instance`` counter and returns the edges themselves.
+
+    Returns a DataFrame with ``instance``, ``pattern_type``, ``source`` and
+    ``target``. HI-Small holds 370 attempts; each is a connected money-flow
+    structure of its own, and the two GARG-AML targets (GATHER-SCATTER,
+    SCATTER-GATHER) can be selected on ``pattern_type``.
+
+    Accounts are returned as the raw strings in the file, which is what
+    ``construct_IBM_graph`` uses for node identity -- it reads the account
+    columns without forcing a dtype, and they contain hexadecimal-looking
+    values, so pandas infers ``object``. Do not "normalise" them here or the
+    node lookups will miss.
+    """
+    rows = []
+    instance = -1
+    pattern_type = ""
+
+    with open(path, "r") as handle:
+        for line in handle:
+            if line.startswith("BEGIN"):
+                instance += 1
+                pattern_type = line.split(" - ")[1].split(":")[0].strip()
+            elif line.startswith("END"):
+                pattern_type = ""
+            elif pattern_type:
+                fields = line.strip().split(",")
+                if len(fields) <= PATTERN_TO_ACCOUNT:
+                    continue  # blank or malformed line inside an attempt
+                rows.append({
+                    "instance": instance,
+                    "pattern_type": pattern_type,
+                    "source": fields[PATTERN_FROM_ACCOUNT],
+                    "target": fields[PATTERN_TO_ACCOUNT],
+                })
+
+    return pd.DataFrame(rows, columns=["instance", "pattern_type",
+                                       "source", "target"])
+
+
 def define_ML_labels(path_trans="data/HI-Small_Trans.csv", path_patterns="data/HI-Small_Patterns.txt", banks=None):
     """Per-transaction laundering labels, optionally under a single-bank view.
 

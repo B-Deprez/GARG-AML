@@ -34,6 +34,14 @@ What it writes, and which reviewer point each answers
 ``table_severance``   (P4, R2-M3)
     Percentage of edges the pre-processing discards, per dataset and
     setting, from ``results/louvain_severance.csv``.
+``table_splitting_<column>``   (P4, R2-M3)
+    What that discarding destroys: laundering attempts left undetectable,
+    their two-hop path survival, and how many are split across communities
+    -- by pattern type and resolution, from
+    ``results/pattern_splitting_summary.csv`` (written by
+    ``scripts/pattern_splitting.py``). The pair with ``table_severance`` is
+    the argument: edges severed is the cost, attempts destroyed is what it
+    costs us.
 
 Before the tables, it prints a coverage report. Read it first: while the
 re-runs are outstanding most cells come from the 15 Sep single-split grid,
@@ -58,10 +66,12 @@ sys.path.append(DIR)
 import pandas as pd
 
 from src.utils.reporting import (HEADLINE_CUTOFFS, HEADLINE_TARGETS,
+                                 SPLITTING_COLUMNS,
                                  ablation_table, alert_table, coverage,
                                  cost_table, load_metrics, results_table,
-                                 severance_table, sweep_table, ties_table,
-                                 variance_table, write_table)
+                                 pattern_splitting_table, severance_table,
+                                 sweep_table, ties_table, variance_table,
+                                 write_table)
 
 # The datasets to build tables for. A missing one is skipped with a message,
 # so leaving LI-Large here before its run finishes costs nothing.
@@ -126,7 +136,7 @@ def build_ablation_tables(df, dataset, written):
                 table, f"ablation_{dataset}_{direction}_{metric}",
                 caption=(f"Feature-group ablation, {direction} {dataset}, "
                          f"{metric.replace('_', '-')}. \\emph{{Degree-only}} "
-                         "contains no GARG-AML signal; \\emph{{blocks only}} "
+                         "contains no GARG-AML signal; \\emph{blocks only} "
                          "is the raw block densities and sizes before "
                          "aggregation; the unlabelled model is the published "
                          "feature set."),
@@ -197,7 +207,7 @@ def build_sweep_tables(df, dataset, written):
                 caption=(f"Sensitivity of {metric.replace('_', '-')} to the "
                          f"Louvain pre-processing, {direction} {dataset}. "
                          "Columns run from no reduction at all to the most "
-                         "aggressive setting; \emph{{r=10}} is the published "
+                         "aggressive setting; \\emph{r=10} is the published "
                          "choice. The published feature configuration is used "
                          "throughout, so this isolates the pre-processing from "
                          "the feature-group sensitivity reported separately."),
@@ -283,12 +293,35 @@ def main():
             severance, "severance",
             caption=("Percentage of edges discarded by the Louvain "
                      "pre-processing, per dataset and resolution. "
-                     "\emph{{r=10}} is the published choice."),
+                     "\\emph{r=10} is the published choice."),
             label="tab:severance",
             note=("Every inter-community edge is dropped before scoring, so "
                   "this is the fraction of the graph the second-order "
                   "neighbourhoods never see."))
         print("\nseverance: "+str(severance.shape))
+
+    # What that discarding destroys. Also outside the per-dataset loop: the
+    # summary already spans datasets, and the table's axes are pattern type
+    # and resolution rather than anything from the metrics frame.
+    for column, (phrase, _) in SPLITTING_COLUMNS.items():
+        table = pattern_splitting_table(column=column)
+        if table.empty:
+            continue
+        written += write_table(
+            table, f"splitting_{column}",
+            caption=("Percentage " + phrase + " after the Louvain "
+                     "pre-processing, by pattern type and resolution. "
+                     "GARG-AML targets GATHER-SCATTER and SCATTER-GATHER, "
+                     "which lead the table."),
+            label=f"tab:splitting-{column.replace('_', '-')}",
+            note=("\\texttt{--} marks a pattern type with no two-hop "
+                  "structure to lose (FAN-OUT, FAN-IN), not a zero. "
+                  "\\emph{no Louvain} is the control: nothing is "
+                  "partitioned, so every attempt survives by construction."))
+        print("splitting ("+column+"): "+str(table.shape))
+    if not written:
+        print("\nNo results/pattern_splitting_summary.csv yet -- run "
+              "scripts/pattern_splitting.py (task 4).")
 
     for dataset in DATASETS:
         build_dataset(df, dataset, written)

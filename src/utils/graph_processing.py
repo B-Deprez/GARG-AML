@@ -153,21 +153,32 @@ def graph_degree(G, degree_cutoff=0.01):
     
     return(G_copy)
 
-def graph_community(G, resolution=10): # large resolution to have smaller communities
-    directed = nx.is_directed(G)
-    
-    if directed:
-        G_undirected = G.copy().to_undirected()
-    else:
-        G_undirected = G.copy()
+def community_map(G, resolution=DEFAULT_RESOLUTION):
+    """``node -> community index``, from the Louvain call the pipeline uses.
 
-    community_list = nx.community.louvain_communities(G_undirected, resolution=resolution, seed=1997)
+    Extracted from :func:`graph_community` so the task-4 pattern-splitting
+    diagnostic can ask which community an account landed in **without
+    reimplementing the partition**. That matters more than it looks: the
+    diagnostic's whole claim is about the edges the pipeline drops, so a
+    second Louvain call with a different undirected view or a different
+    seed would answer a question about a partition nobody scored.
+    """
+    G_undirected = G.copy().to_undirected() if nx.is_directed(G) else G.copy()
 
-    # Create a dictionary to map nodes to their community
+    community_list = nx.community.louvain_communities(
+        G_undirected, resolution=resolution, seed=1997)
+
     node_community = {}
     for idx, community in enumerate(community_list):
         for node in community:
             node_community[node] = idx
+    return node_community
+
+
+def graph_community(G, resolution=10): # large resolution to have smaller communities
+    directed = nx.is_directed(G)
+
+    node_community = community_map(G, resolution)
 
     # Create a new graph with only intra-community edges
     if directed:
