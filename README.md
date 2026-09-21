@@ -67,6 +67,7 @@ python scripts/gargaml_tree.py         # stage 2: train + evaluate -> results/
 | Partial-observability appendix: score on the full graph vs a bank's view | `scripts/partial_observability.py` | `results/<view>_partial_observability_accounts.csv`, `..._metrics.csv` |
 | Appendix tables and figures | `notebooks/BankObservability.ipynb` | `results/appendix_*.csv`, `results/appendix_*.pdf` |
 | Directed-vs-undirected diagnosis | `scripts/directed_diagnosis.py` | `results/<dataset>_directed_diagnosis.csv` (per node: level census, reciprocal census, five score variants), `..._summary.csv` (means by ground-truth class and structural role), `..._directed_diagnosis_metrics.csv` (each variant through the shared metrics), and the pooled `results/directed_diagnosis_{summary,metrics}.csv` |
+| Revision tables: results, ablation, alert queue, fold variance, cost | `scripts/build_tables.py` | `results/table_*.tex` and a `.csv` twin of each, plus `results/table_coverage.csv` saying which model/config combinations are on disk and whether they predate the cross-validation |
 | Tree / boosting / GraphSAGE under a bank view | the model scripts above, run on a view name | the same files, under `results/<dataset>_bank<b>_*` |
 
 FlowScope and AutoAudit are not run from this repository (see *Experimental
@@ -90,6 +91,16 @@ from `results-0/` and `results-aa/`.
   Under `N_FOLDS >= 2` the historical `_combined.csv` matrices hold the **mean
   over folds** rather than a single split's value — same filenames and shape,
   a different quantity — with `_std_combined.csv` companions beside them.
+- **Reading the tables.** `scripts/build_tables.py` assembles every table from
+  the tidy metrics and never mixes the three kinds of row the `fold` column
+  distinguishes: per-fold (`>= 0`) gives the mean and spread, pooled
+  out-of-fold (`-1`) is the only correct population for the alert-queue
+  metrics, and `NaN` is a single-split or full-population run. Alert tables
+  print the population each row was ranked over, because a model still on the
+  single split is ranked over its test slice while a cross-validated one is
+  ranked over every account. A `--` is a cell that could not be evaluated and
+  a starred cell is a mean over fewer folds than the rest; both are reported
+  rather than dropped.
 - **Per-dataset sweep reductions.** `DATASET_SETTINGS` in
   `scripts/gargaml_tree.py` narrows the cut-off/pattern grid for one dataset
   without touching the defaults: LI-Large runs the paper's headline cut-offs
@@ -164,6 +175,7 @@ src/
     features.py               # feature column groups and named configurations
     naming.py                 # canonical model names for tables and figures
     hyperparameters.py        # hyperparameter provenance for every fitted model
+    reporting.py              # tidy metrics -> paper tables (fold-aware)
 
 scripts/                      # runnable entry points (run from the repo root)
   gargaml_directed.py         #   compute directed measures on IBM data
@@ -174,6 +186,7 @@ scripts/                      # runnable entry points (run from the repo root)
   graphsage_baseline.py       #   GraphSAGE baseline on the same folds
   gargaml_link_label.py       #   edge-/link-level labelling
   distribution_scores.py      #   score-distribution analysis
+  build_tables.py             #   tidy metrics -> LaTeX/CSV tables for the paper
   directed_diagnosis.py       #   directed-vs-undirected diagnosis on the
                               #   synthetic grid (and sampled HI-Small)
   nbstrip.py                  #   repository hygiene, not part of the pipeline
