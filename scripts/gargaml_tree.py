@@ -15,7 +15,7 @@ from src.methods.gargaml_scores import define_gargaml_scores, summarise_gargaml_
 from src.data.graph_construction import construct_IBM_graph
 from src.data.bank_views import (bank_clients, parse_view, patterns_path,
                                  resolve_banks, trans_path)
-from src.utils.graph_processing import graph_community
+from src.utils.graph_processing import parse_resolution, reduce_graph
 from src.utils.evaluation import (
     SEED,
     cv_splits,
@@ -77,7 +77,28 @@ from pickle import dump
 # task 7's 5-fold CV beside LI-Large numbers still coming from the original
 # single 70/30 split *and* from before task 2's predict_proba fix, which is a
 # table whose two halves are not the same quantity.
-DATASETS = ["HI-Small_bank012", "HI-Small_banktop50", "HI-Small", "LI-Large"]
+#
+# Task 4 (R2-M3): the Louvain sensitivity sweep. The setting rides in the
+# dataset name -- "_res<r>" for a resolution, "_nolouvain" for no reduction at
+# all -- so each arm writes its own measures and a bare name keeps the
+# published resolution of 10. See src/utils/graph_processing.parse_resolution.
+#
+# Cost: HI-Small stage 1 is ~5 min per direction at resolution 10, so the four
+# extra resolutions add ~20 min. The **no-Louvain arms are a different order of
+# magnitude**, not a slower version of the same thing: the reduction is what
+# keeps a second-order ego graph small, and without it HI-Small's reach ~14,900
+# accounts, each of which GARG_AML_node_*_measures densifies with
+# nx.adjacency_matrix(...).toarray() -- roughly 1.8 GB for one node (measured
+# while building task 5's appendix). They are listed last and deliberately:
+# expect LI-Large_nolouvain to be infeasible rather than slow, and record that
+# outcome, because "what the pre-processing buys" is exactly what R2-M3 asks.
+DATASETS = ["HI-Small_bank012", "HI-Small_banktop50",
+            "HI-Small_res1", "HI-Small_res5",
+            "HI-Small",                        # the published setting, res 10
+            "HI-Small_res20", "HI-Small_res50",
+            "LI-Large",
+            # No-Louvain arms last -- see the note above.
+            "HI-Small_nolouvain", "LI-Large_nolouvain"]
 
 # The default sweep: every cut-off and every pattern.
 CUT_OFFS = [0.1, 0.2, 0.3, 0.5, 0.9]
@@ -172,7 +193,11 @@ def reduced_graph(dataset):
     """
     base, banks = parse_view(dataset)  # task 5: None for the full graph
     G = construct_IBM_graph(path = trans_path(dataset), directed = False, banks = banks)
-    return graph_community(G)
+    # Task 4: same Louvain setting stage 1 used, read back out of the dataset
+    # name, so the neighbourhood features match the measures they are joined
+    # to. dataset is not passed on: stage 1 already logged the severance and
+    # this would duplicate the row.
+    return reduce_graph(G, parse_resolution(dataset)[1])
 
 def data_preparation(dataset, feature_cols, directed, score_type, G_reduced = None):
     """Build one feature table holding every column in ``feature_cols``.

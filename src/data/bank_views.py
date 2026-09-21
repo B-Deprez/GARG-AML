@@ -52,6 +52,8 @@ from typing import Iterable, Sequence
 
 import pandas as pd
 
+from src.utils.graph_processing import strip_resolution
+
 # The two columns a view is defined on, and the account columns they pair
 # with. ``Account`` is booked at ``From Bank``, ``Account.1`` at ``To Bank``.
 BANK_COLUMNS = ("From Bank", "To Bank")
@@ -178,11 +180,24 @@ def parse_view(name: str) -> tuple[str, list[str] | None]:
     Lets a script keep configuring itself with a flat list of dataset-name
     strings while still knowing which data file to read and which filter to
     apply.
+
+    Task 4 decorates the same names with a Louvain setting
+    (``HI-Small_res20``, ``HI-Small_nolouvain``), so the token is stripped
+    here: this is the one place a dataset name is mapped back to its
+    underlying data, and doing it here means :func:`trans_path`,
+    :func:`patterns_path` and every ``base, banks = parse_view(...)`` caller
+    keep working untouched. Use
+    :func:`src.utils.graph_processing.parse_resolution` to read the setting
+    itself.
     """
     if VIEW_SEPARATOR not in name:
-        return name, None
+        return strip_resolution(name), None
     dataset, _, banks = name.partition(VIEW_SEPARATOR)
-    return dataset, normalise_banks(banks.split("-"))
+    # The Louvain token may sit on either side of the bank separator, since
+    # "HI-Small_res20_bank012" and "HI-Small_bank012_res20" are both natural
+    # things to type; strip both parts rather than fixing an order.
+    return strip_resolution(dataset), normalise_banks(
+        strip_resolution(banks).split("-"))
 
 
 def trans_path(name: str, directory: str = "data") -> str:

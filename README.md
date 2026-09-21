@@ -64,6 +64,7 @@ python scripts/gargaml_tree.py         # stage 2: train + evaluate -> results/
 | Synthetic network illustrations | `notebooks/VisualisationNetwork.ipynb` | `data/combined_synthetic_networks.pdf` |
 | Worked toy example (Appendix A) | `notebooks/toyexample.ipynb` | inline figures |
 | Edges severed by the Louvain filter | `notebooks/LouvainEdgeSeverance.ipynb` | inline table |
+| Louvain sensitivity sweep (resolution, and no Louvain at all) | `scripts/gargaml_undirected.py`, `scripts/gargaml_directed.py`, `scripts/gargaml_tree.py`, run on the `_res<r>` / `_nolouvain` dataset names | `results/louvain_severance.csv` (edges severed per dataset and setting) plus the usual per-dataset measure and metric files under those names |
 | Partial-observability appendix: score on the full graph vs a bank's view | `scripts/partial_observability.py` | `results/<view>_partial_observability_accounts.csv`, `..._metrics.csv` |
 | Appendix tables and figures | `notebooks/BankObservability.ipynb` | `results/appendix_*.csv`, `results/appendix_*.pdf` |
 | Directed-vs-undirected diagnosis | `scripts/directed_diagnosis.py` | `results/<dataset>_directed_diagnosis.csv` (per node: level census, reciprocal census, five score variants), `..._summary.csv` (means by ground-truth class and structural role), `..._directed_diagnosis_metrics.csv` (each variant through the shared metrics), and the pooled `results/directed_diagnosis_{summary,metrics}.csv` |
@@ -101,6 +102,14 @@ from `results-0/` and `results-aa/`.
   ranked over every account. A `--` is a cell that could not be evaluated and
   a starred cell is a mean over fewer folds than the rest; both are reported
   rather than dropped.
+- **Louvain setting.** The pre-processing resolution rides in the dataset
+  name, the same way a bank view does: `HI-Small_res20` is HI-Small reduced at
+  resolution 20, `HI-Small_nolouvain` skips the reduction entirely, and a bare
+  `HI-Small` keeps the published value of 10, so existing result files are
+  untouched. Every run prints the percentage of edges severed and stage 1
+  appends it to `results/louvain_severance.csv`. The no-Louvain arm is far more
+  than a slower run: the reduction is what bounds the second-order ego graphs,
+  and without it a single HI-Small node can densify to roughly 1.8 GB.
 - **Per-dataset sweep reductions.** `DATASET_SETTINGS` in
   `scripts/gargaml_tree.py` narrows the cut-off/pattern grid for one dataset
   without touching the defaults: LI-Large runs the paper's headline cut-offs

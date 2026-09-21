@@ -13,7 +13,7 @@ sys.path.append(DIR)
 
 from src.data.graph_construction import construct_IBM_graph, construct_synthetic_graph
 from src.data.bank_views import parse_view, trans_path
-from src.utils.graph_processing import graph_community
+from src.utils.graph_processing import parse_resolution, reduce_graph
 from src.methods.GARGAML import GARG_AML_node_undirected_measures
 
 import warnings
@@ -61,8 +61,28 @@ def process_node(node):
 # (gargaml_tree.py) skips a dataset whose measures are missing rather than
 # failing, so an interrupted or trimmed run still leaves a usable results/.
 # Comment out what you do not need; LI-Large is the multi-hour job.
+#
+# Task 4 (R2-M3): the Louvain sensitivity sweep. The setting rides in the
+# dataset name -- "_res<r>" for a resolution, "_nolouvain" for no reduction at
+# all -- so each arm writes its own measures and a bare name keeps the
+# published resolution of 10. See src/utils/graph_processing.parse_resolution.
+#
+# Cost: HI-Small stage 1 is ~5 min per direction at resolution 10, so the four
+# extra resolutions add ~20 min. The **no-Louvain arms are a different order of
+# magnitude**, not a slower version of the same thing: the reduction is what
+# keeps a second-order ego graph small, and without it HI-Small's reach ~14,900
+# accounts, each of which GARG_AML_node_*_measures densifies with
+# nx.adjacency_matrix(...).toarray() -- roughly 1.8 GB for one node (measured
+# while building task 5's appendix). They are listed last and deliberately:
+# expect LI-Large_nolouvain to be infeasible rather than slow, and record that
+# outcome, because "what the pre-processing buys" is exactly what R2-M3 asks.
 datasets = ["HI-Small_bank012", "HI-Small_banktop50",
-            "HI-Small", "LI-Large"]
+            "HI-Small_res1", "HI-Small_res5",
+            "HI-Small",                        # the published setting, res 10
+            "HI-Small_res20", "HI-Small_res50",
+            "LI-Large",
+            # No-Louvain arms last -- see the note above.
+            "HI-Small_nolouvain", "LI-Large_nolouvain"]
 directed = False
 # Parallelism: use up to 4 or half of CPUs
 n_cpu = min(4, cpu_count() // 2)
@@ -83,8 +103,10 @@ if __name__ == '__main__':
         if banks is not None:
             print(f"Single-bank view of {base}: banks {banks}")
 
-        # Optionally apply community reduction
-        G_reduced = graph_community(G)
+        # Task 4: the Louvain setting rides in the dataset name
+        # ("HI-Small_res20", "HI-Small_nolouvain"); a bare name keeps
+        # the published resolution of 10. Stage 1 owns the severance log.
+        G_reduced = reduce_graph(G, parse_resolution(dataset)[1], dataset)
 
         nodes = list(G_reduced.nodes)
         print(f"Number of nodes: {len(nodes)} | Using {n_cpu} processes")
