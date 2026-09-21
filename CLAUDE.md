@@ -87,6 +87,20 @@ folds:
 Remaining tasks (4–13) are largely independent loops over the existing pipeline. Three of
 them already have work on disk:
 
+- **Task 6** — code DONE, first results in. `src/methods/directed_diagnosis.py` +
+  `scripts/directed_diagnosis.py`. **The answer is hypothesis (b), and it is
+  structural.** Eq. 14 is oriented correctly only for the *source* of a pattern:
+  on `S -> m1..m4 -> T` the directed score is 1.000 / 0.179 / **−0.286** for
+  source / mule / target where the undirected score is 1.000 for all three. Two
+  separate failure modes — targets are scored backwards (their distance-2 nodes
+  are senders, which Eq. 11 puts at level 2), and mules lose level 2 entirely
+  (sibling mules are at undirected distance 2 with no directed 2-path either way,
+  so Eq. 11 cannot place them). On HI-Small **83.1 % of all distance-2 nodes are
+  unplaceable** and **47.5 % of accounts have an empty level 2**.
+  Hypothesis (a) is measured and ruled out: reciprocal pairs appear in 8.6 % of
+  ego graphs and removing them moves the mean score by +0.0014. **Do not
+  reinstate the transpose-max** on the strength of this — it closes 55 % of the
+  gap but is not in the paper, and the mule failure mode survives it.
 - **Task 4** — `notebooks/LouvainEdgeSeverance.ipynb` quantifies the % of edges severed
   on every dataset, but only at `resolution = 10`. The resolution sweep, the
   split-pattern diagnostic and the no-Louvain run are still open.
@@ -164,12 +178,30 @@ revision. Do not add new hard-coded uses of them:
 
 ### Stale results on disk — every directed synthetic measure file
 
-Commit `c5fba86` (2025-10-31, "bug fix") changed `measure_12_function`: an empty
-block used to return density **1** unconditionally, and now returns 1 only when
-`size_2 > 0`, else 0. `measure_12` is one of the two blocks Eq. 14 expects to be
-*dense*, so the old behaviour handed full credit to nodes with no level-2
-neighbours at all — inflating the directed score for exactly the nodes that are
-least smurfing-like.
+Commit `c5fba86` (2025-10-31, "bug fix") fixed **four** measure functions, not
+one. Both defects fire on the same nodes — those with `size_2 == 0`, i.e. no
+level-2 neighbours at all:
+
+1. `measure_12_function`: an empty block used to return density **1**
+   unconditionally, and now returns 1 only when `size_2 > 0`, else 0.
+   `measure_12` is one of the two blocks Eq. 14 expects to be *dense*, so the
+   old behaviour handed full credit to nodes with no level-2 neighbours.
+2. `measure_20/21/22_function` sliced with `adj_full[-size_2:, ...]`, and
+   **`-0:` is the whole array, not an empty one** — so when `size_2 == 0` three
+   *penalty* blocks were computed from unrelated parts of the adjacency matrix
+   rather than from an empty block. Unit-tested: on a 5×5 ego adjacency with
+   `size_2 = 0`, the old `measure_22` summed all 25 entries.
+
+So the old code inflated a reward block *and* polluted three penalty blocks, for
+exactly the nodes that are least smurfing-like. Earlier notes here described
+only defect 1; the `measure_20/21/22` half was verified on 2026-09-21.
+
+**`results/HI-Small_GARGAML_directed.csv` is pre-fix too** (Apr 2025), not just
+the synthetic files: 245,725 of 515,080 nodes (**47.7 %**) have `size_12 == 0`
+with `measure_12 = 1.0`, which the fixed code cannot produce — an empty block 12
+means `size_1 == 0` or `size_2 == 0`, and `size_1 == 0` implies `size_2 == 0`,
+so the fixed code returns 0 for every one of them. On 153,371 of those rows
+`measure_22` is non-zero where the fixed code gives exactly 0.
 
 **Every directed synthetic measure file on disk still holds the pre-fix values**,
 in all three results directories:
@@ -193,11 +225,18 @@ alerting metrics use, moves materially on some datasets.
 
 The undirected files are unaffected; the bug was directed-only.
 
-**This bears on task 6.** The open question is why the directed score
-underperforms the undirected one. A defect that inflated directed scores for
-non-smurfing nodes, fixed in code in October 2025 but never reflected in any
-stored result, is a plausible contributor — every directed synthetic number
-reported so far was computed with it. Regenerating before instrumenting Eq. 11
+**This bears on task 6 — but not in the direction first assumed.** Task 6's
+diagnosis (`scripts/directed_diagnosis.py`) measured it: the pre-fix score
+is **higher** than the fixed one (HI-Small mean 0.4845 vs 0.2785), and on the
+synthetic grid the buggy version scores *better* against the labels (AUC-ROC
+0.527 vs 0.477). The defect was **masking** part of the directed variant's
+weakness, mainly by handing mules a spurious `measure_12 = 1`. Regenerating will
+therefore make the directed results worse than published, not better, and it is
+not the explanation for R2-M2 — see task 6 in `GARG-AML_code_changes.md` for what
+is. The paragraph below is kept for the regeneration cost estimate; its
+reasoning about task 6 has been superseded.
+
+Regenerating before instrumenting Eq. 11
 is worthwhile.
 
 **Decided (2026-09-21): keep the fix, regenerate the results.** `c5fba86` stays;

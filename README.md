@@ -56,14 +56,17 @@ python scripts/gargaml_tree.py         # stage 2: train + evaluate -> results/
 | Isolation-forest baseline | `scripts/gargaml_IF.py` | `results/<dataset>_<direction>_if_metrics.csv` and `results/<dataset>_<metric>_isolationforest_<direction>_if_combined.csv` |
 | GraphSAGE baseline, both feature configs | `scripts/graphsage_baseline.py` | `results/<dataset>_undirected_graphsage[_attr]_metrics.csv`, the matching `_combined.csv` matrices, plus `results/<dataset>_graphsage_runs.csv` (one row per run, with timings) and `_graphsage_summary.csv` (mean/std over folds) |
 | Score distributions, histograms and lift curves | `scripts/distribution_scores.py`, `notebooks/DistributionScores.ipynb` | `results/<dataset>_GARGAML_<direction>_*histogram.pdf`, `*_lift.pdf` |
+| Base GARG-AML score metrics, per fold and pooled | `scripts/distribution_scores.py` | `results/<dataset>_<direction>_base_metrics.csv` (tidy; the full-population row keeps `fold = NaN` and is the number in `results/results_performance_IBM_<direction>.txt`, unchanged) |
 | Performance tables and figures | `notebooks/VisualisationResults.ipynb` | `results/<dataset>_AUC-ROC_AUC-PR.pdf`, LaTeX tables |
 | Critical-difference diagrams (Figs. 10-11) | `notebooks/VisualisationResults.ipynb` | `results/CD_ROC_full.pdf`, `results/CD_PR_full.pdf` |
+| Friedman &chi;&sup2; / p-values, multiple-testing control, Nemenyi matrices | `notebooks/VisualisationResults.ipynb` | `results/friedman_results.csv` (per metric and pattern: &chi;&sup2;, df, raw *p*, Bonferroni- and Holm-adjusted *p*, the Nemenyi critical difference) and `results/nemenyi_pvalues_<metric>_<pattern>.csv` |
 | Runtime / scalability comparison (Fig. 6) | `notebooks/VisualisationRunTime.ipynb` | `results/time_boxplot_norm.pdf` |
 | Synthetic network illustrations | `notebooks/VisualisationNetwork.ipynb` | `data/combined_synthetic_networks.pdf` |
 | Worked toy example (Appendix A) | `notebooks/toyexample.ipynb` | inline figures |
 | Edges severed by the Louvain filter | `notebooks/LouvainEdgeSeverance.ipynb` | inline table |
 | Partial-observability appendix: score on the full graph vs a bank's view | `scripts/partial_observability.py` | `results/<view>_partial_observability_accounts.csv`, `..._metrics.csv` |
 | Appendix tables and figures | `notebooks/BankObservability.ipynb` | `results/appendix_*.csv`, `results/appendix_*.pdf` |
+| Directed-vs-undirected diagnosis | `scripts/directed_diagnosis.py` | `results/<dataset>_directed_diagnosis.csv` (per node: level census, reciprocal census, five score variants), `..._summary.csv` (means by ground-truth class and structural role), `..._directed_diagnosis_metrics.csv` (each variant through the shared metrics), and the pooled `results/directed_diagnosis_{summary,metrics}.csv` |
 | Tree / boosting / GraphSAGE under a bank view | the model scripts above, run on a view name | the same files, under `results/<dataset>_bank<b>_*` |
 
 FlowScope and AutoAudit are not run from this repository (see *Experimental
@@ -77,10 +80,24 @@ from `results-0/` and `results-aa/`.
 - **Cross-validation.** `scripts/gargaml_tree.py` carries an `N_FOLDS` switch:
   `0` reproduces the original single stratified 70/30 split, `>= 2` runs that
   many stratified folds plus a pooled out-of-fold pass. The fold partition is
-  written to `results/<dataset>_folds.csv` so other models (GraphSAGE) evaluate
-  on exactly the same folds. Note that the evaluation is **transductive**: the
-  neighbourhood summary features are computed on the full graph before
-  splitting.
+  written to `results/<dataset>_folds.csv` so other models (GraphSAGE, and the
+  base scores in `scripts/distribution_scores.py`) evaluate on exactly the same
+  folds. Note that the evaluation is **transductive**: the neighbourhood
+  summary features are computed on the full graph before splitting.
+  Cross-validation is scoped to the IBM datasets; the 66 synthetic datasets
+  keep the single 70/30 split, and every consumer of the partition falls back
+  to full-population metrics when no `_folds.csv` exists.
+  Under `N_FOLDS >= 2` the historical `_combined.csv` matrices hold the **mean
+  over folds** rather than a single split's value — same filenames and shape,
+  a different quantity — with `_std_combined.csv` companions beside them.
+- **Per-dataset sweep reductions.** `DATASET_SETTINGS` in
+  `scripts/gargaml_tree.py` narrows the cut-off/pattern grid for one dataset
+  without touching the defaults: LI-Large runs the paper's headline cut-offs
+  (0.1 / 0.5 / 0.9) only, matching `graphsage_baseline.py`, because the full
+  grid is 360 fits and 1800 under 5-fold CV. Omitted cells are still written,
+  as `NaN` with a `"not in this dataset's sweep"` status, so the result
+  matrices keep their published shape and the reduction is visible in the
+  output rather than inferred from a missing row.
 - **Feature configurations.** `src/utils/features.py` defines four column
   groups and the named configurations that select them; `run_config` writes the
   exact matrix it used to
@@ -139,6 +156,8 @@ src/
     utils/                    #   block-density measures (directed & undirected),
                               #   node ordering and neighbourhood statistics
     graphsage.py              # GraphSAGE baseline: graph build, model, training
+    directed_diagnosis.py     # why undirected beats directed: level census,
+                              #   reciprocal-edge census, five score variants
   utils/
     graph_processing.py       # Louvain community filtering & hub removal
     evaluation.py             # shared metrics, splits and result writing
@@ -155,6 +174,8 @@ scripts/                      # runnable entry points (run from the repo root)
   graphsage_baseline.py       #   GraphSAGE baseline on the same folds
   gargaml_link_label.py       #   edge-/link-level labelling
   distribution_scores.py      #   score-distribution analysis
+  directed_diagnosis.py       #   directed-vs-undirected diagnosis on the
+                              #   synthetic grid (and sampled HI-Small)
   nbstrip.py                  #   repository hygiene, not part of the pipeline
 
 notebooks/                    # exploratory analysis and paper figures
