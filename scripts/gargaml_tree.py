@@ -13,6 +13,8 @@ import pandas as pd
 from src.data.pattern_construction import define_ML_labels, summarise_ML_labels, combine_patterns_GARGAML
 from src.methods.gargaml_scores import define_gargaml_scores, summarise_gargaml_scores
 from src.data.graph_construction import construct_IBM_graph
+from src.data.bank_views import (bank_clients, parse_view, patterns_path,
+                                 resolve_banks, trans_path)
 from src.utils.graph_processing import graph_community
 from src.utils.evaluation import (
     SEED,
@@ -36,6 +38,7 @@ from src.utils.features import (
     is_direction_free,
     needs_neighbourhood,
 )
+from src.utils.hyperparameters import write_hyperparameters
 from src.utils.naming import gargaml_key, pretty_config
 
 from sklearn import tree
@@ -45,6 +48,22 @@ from pickle import dump
 
 # The label cut-offs and the pattern targets are swept identically by every
 # feature config, so they live here rather than being re-declared per config.
+# Task 5: an entry is either a plain dataset (the full graph, as published)
+# or a single-bank view "<dataset>_bank<b>". A view reads the same
+# data/<dataset>_Trans.csv but keeps only the transactions booked at bank b,
+# reads its own results/<dataset>_bank<b>_GARGAML_*.csv measures (run the
+# measure scripts on the view first) and writes its own result files. Choose
+# the banks with notebooks/BankObservability.ipynb.
+# Task 5 partial-observability views, selected by notebooks/BankObservability.ipynb:
+#   012      the largest bank by clients -- 0.512% of all accounts, 1.958% of
+#            all transactions
+#   top50    the 50 largest banks pooled into one institution -- 10.8% of
+#            accounts, 31.4% of transactions, which is the realistic size of a
+#            large bank and the only setting with enough positives to evaluate
+# The appendix comparison itself is scripts/partial_observability.py; these
+# entries exist for running the ordinary tree/boosting pipeline on a view.
+DATASETS = ["HI-Small", "HI-Small_bank012", "HI-Small_banktop50"]
+
 CUT_OFFS = [0.1, 0.2, 0.3, 0.5, 0.9]
 TARGET_COLUMNS = ['Is Laundering', 'FAN-OUT', 'FAN-IN', 'GATHER-SCATTER', 'SCATTER-GATHER', 'CYCLE', 'RANDOM', 'BIPARTITE', 'STACK']
 
@@ -84,6 +103,24 @@ def gargaml_boosting(X, y, save = False, save_path = "results/model_boosting.pkl
 
     return clf
 
+def measures_path(dataset, directed):
+    """Where stage 1 wrote ``dataset``'s block measures for this direction."""
+    return "results/"+dataset+"_GARGAML_"+("directed" if directed else "undirected")+".csv"
+
+def available_directions(dataset):
+    """Directions of ``dataset`` whose stage-1 measures are actually on disk.
+
+    This script is stage 2 of a decoupled pipeline: it reads what
+    gargaml_directed.py / gargaml_undirected.py wrote. A dataset listed in
+    DATASETS whose measures were never computed -- a task-5 bank view is the
+    usual case, since the measure scripts have to be run on the view name
+    first -- would otherwise take down the whole loop with a bare
+    FileNotFoundError, after the graph had been built and Louvain run, and
+    after the hyperparameter file for it had already been written. Report the
+    gap and carry on with the datasets that are ready instead.
+    """
+    return [d for d in [False, True] if os.path.exists(measures_path(dataset, d))]
+
 def reduced_graph(dataset):
     """The Louvain-reduced graph the neighbourhood summaries are computed on.
 
@@ -93,7 +130,8 @@ def reduced_graph(dataset):
     construction plus Louvain is where this script's run time goes; the
     model fits are cheap next to it.
     """
-    G = construct_IBM_graph(path = "data/"+dataset+"_Trans.csv", directed = False)
+    base, banks = parse_view(dataset)  # task 5: None for the full graph
+    G = construct_IBM_graph(path = trans_path(dataset), directed = False, banks = banks)
     return graph_community(G)
 
 def data_preparation(dataset, feature_cols, directed, score_type, G_reduced = None):
@@ -109,8 +147,13 @@ def data_preparation(dataset, feature_cols, directed, score_type, G_reduced = No
     demand, which is what a single-config caller wants.
     """
     str_directed = "directed" if directed else "undirected"
+    base, banks = parse_view(dataset) #task 5: None for the full graph
+    # Expand a group spec ("top50") into its member banks before anything
+    # filters on it: bank_clients matches against the bank column and would
+    # otherwise select nobody. resolve_banks caches per (path, spec).
+    banks = resolve_banks(banks, trans_path(dataset))
 
-    results_df_measures = pd.read_csv("results/"+dataset+"_GARGAML_"+str_directed+".csv") #measures
+    results_df_measures = pd.read_csv(measures_path(dataset, directed)) #measures
 
     results_df = define_gargaml_scores(results_df_measures, directed, score_type=score_type) #summary scores
 
@@ -124,8 +167,9 @@ def data_preparation(dataset, feature_cols, directed, score_type, G_reduced = No
         results_df = results_df.join(results_df_measures.set_index("node")[block_columns])
 
     transactions_df_extended, pattern_columns = define_ML_labels( #patterns
-        path_trans = "data/"+dataset+"_Trans.csv",
-        path_patterns = "data/"+dataset+"_Patterns.txt"
+        path_trans = trans_path(dataset),
+        path_patterns = patterns_path(dataset),
+        banks = banks
     )
 
     summary_columns = [c for c in feature_cols if c not in block_columns] #groups (a), (c), (d)
@@ -138,6 +182,18 @@ def data_preparation(dataset, feature_cols, directed, score_type, G_reduced = No
             results_df[column] = summary_gargaml[column]
 
     laundering_combined, _, _ = summarise_ML_labels(transactions_df_extended,pattern_columns)
+
+    if banks is not None:
+        # Task 5: a bank alerts on its own customers, so they are the
+        # evaluated population -- not the external counterparties, which stay
+        # in the graph as neighbours but are not scored. This also keeps the
+        # labels honest: a bank sees every transaction of its own clients, so
+        # their propensities here equal the full-data ones and the view-vs-full
+        # comparison varies only the features. Restricting before
+        # combine_patterns_GARGAML also spares it the dropped accounts.
+        clients = bank_clients(transactions_df_extended, banks)
+        laundering_combined = laundering_combined[laundering_combined.index.isin(clients)]
+        print("  bank view: "+str(len(laundering_combined))+" client accounts evaluated")
 
     combined_patterns_GARGAML = combine_patterns_GARGAML(results_df, laundering_combined, columns = feature_cols)
 
@@ -315,10 +371,34 @@ def run_config(laundering_combined, dataset, directed, config, seed=SEED):
     return write_metrics(records, dataset, str_directed, suffix=suffix, write_std=(N_FOLDS >= 2))
 
 def main():
-    dataset = "HI-Small"
+    for dataset in DATASETS:
+        run_dataset(dataset)
+
+def run_dataset(dataset):
     score_type = "weighted_average"
 
     configs = list(FEATURE_CONFIGS) # full (published), blocks, topology, all
+
+    # Stage 1 must have run on this dataset name -- including on a bank view's
+    # name, which is a dataset of its own. Check before building the graph:
+    # that plus Louvain is where this script's time goes, and there is no
+    # point paying for it only to fail on the first read.
+    directions = available_directions(dataset)
+    if not directions:
+        print("\n### "+dataset+" -- SKIPPED: no block measures on disk ("
+              +measures_path(dataset, False)+"). Run gargaml_undirected.py / "
+              "gargaml_directed.py on this dataset name first. ###")
+        return
+    for directed in [False, True]:
+        if directed not in directions:
+            print("\n### "+dataset+" ("+("directed" if directed else "undirected")
+                  +") -- SKIPPED: "+measures_path(dataset, directed)+" not found ###")
+
+    # Task 9: record what every estimator was configured with, and that none
+    # of it was searched or selected on the test split (R1-4). Written up
+    # front rather than at the end, so an interrupted run still documents
+    # the configuration its partial results came from.
+    print("hyperparameters -> "+write_hyperparameters(dataset))
 
     # The reduced graph does not depend on the direction, so it is built
     # once for both passes instead of once per data_preparation call.
@@ -335,7 +415,7 @@ def main():
     done = set() # direction-free configs already run; see is_direction_free
     fold_partition_written = False
 
-    for directed in [False, True]:
+    for directed in directions:
         str_directed = "directed" if directed else "undirected"
 
         # A direction-free config (topology) has an identical feature matrix
