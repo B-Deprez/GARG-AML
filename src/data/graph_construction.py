@@ -1,13 +1,29 @@
 import pandas as pd
 import networkx as nx
 
-def construct_IBM_graph(path="data/HI-Small_Trans.csv", directed=False):
+from src.data.bank_views import BANK_COLUMNS, filter_transactions, resolve_banks
+
+def construct_IBM_graph(path="data/HI-Small_Trans.csv", directed=False, banks=None):
     """
     Construct a graph from the IBM data.
+
+    ``banks`` restricts the graph to a single institution's view (task 5):
+    only transactions booked at one of those banks are kept, i.e. those with
+    at least one endpoint among its clients. ``None`` is the full graph and
+    the default, so every existing call site is unaffected.
     """
+    banks = resolve_banks(banks, path) #expands a group spec such as "top50"
+
+    # Bank identifiers are zero-padded and infer as int64 ("010" -> 10), so
+    # they are forced to str when -- and only when -- a view is being built.
+    # The account columns keep their inferred dtype: they are the node keys,
+    # and changing how they are read would change node identity.
+    dtype = {c: str for c in BANK_COLUMNS} if banks is not None else None
+
     # Load the data
-    data = pd.read_csv(path)
-    
+    data = pd.read_csv(path, dtype=dtype)
+    data = filter_transactions(data, banks)
+
     # Create the graph
     if directed:
         G = nx.DiGraph()

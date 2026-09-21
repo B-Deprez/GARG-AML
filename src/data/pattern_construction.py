@@ -1,6 +1,8 @@
 import pandas as pd
 import numpy as np
 
+from src.data.bank_views import filter_transactions, resolve_banks
+
 def create_identifiers(df):
     """
     Create a list of identifiers for each row in the dataframe.
@@ -101,7 +103,15 @@ def create_AML_labels(path= "data/HI-Small_Patterns.txt"):
 
     return df_patterns
 
-def define_ML_labels(path_trans="data/HI-Small_Trans.csv", path_patterns="data/HI-Small_Patterns.txt"):
+def define_ML_labels(path_trans="data/HI-Small_Trans.csv", path_patterns="data/HI-Small_Patterns.txt", banks=None):
+    """Per-transaction laundering labels, optionally under a single-bank view.
+
+    ``banks`` (task 5) keeps only the transactions booked at those banks.
+    The patterns file is read whole either way and joined on the transaction
+    identifier, so a view simply sees fewer of its rows -- there is no
+    separate patterns file per view. ``None`` is the full data and the
+    default.
+    """
     dtype_dict = {
             "From Bank": str,
             "To Bank": str,
@@ -109,7 +119,13 @@ def define_ML_labels(path_trans="data/HI-Small_Trans.csv", path_patterns="data/H
             "Account.1": str
         }
 
+    banks = resolve_banks(banks, path_trans) #expands a group spec such as "top50"
+
     transactions_df = pd.read_csv(path_trans, dtype=dtype_dict)
+    # Filter before the identifier/pattern join: the identifier is built from
+    # the row's own columns, so dropping rows first is equivalent and saves
+    # the join on ~98% of the file for a single-bank view.
+    transactions_df = filter_transactions(transactions_df, banks)
 
     columns_money = ['Amount Received', 'Amount Paid']
     for col in columns_money: # make sure monetary amounts have two decimals
