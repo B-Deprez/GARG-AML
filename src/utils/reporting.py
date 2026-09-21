@@ -57,6 +57,7 @@ import pandas as pd
 
 from src.utils.evaluation import ALERT_SIZES, LEGACY_METRICS
 from src.utils.features import is_direction_free
+from src.utils.graph_processing import DEFAULT_RESOLUTION, parse_resolution
 from src.utils.naming import MODEL_ORDER, pretty_config
 
 # Where a tidy file's name comes apart: <dataset>_<direction><suffix>_metrics.csv.
@@ -490,6 +491,122 @@ def cost_table(df, dataset, metrics=None, n_folds=None, latex=True):
         model_label(m, f) for m, f in zip(summary["model"], summary["features"])]
     return _pivot(summary, index="variant", columns="metric", n_folds=n_folds,
                   digits=1, bold_max=False, latex=latex)
+
+
+def louvain_setting(df):
+    """Split ``dataset`` into its base name and its Louvain setting (task 4).
+
+    The sweep encodes the setting in the dataset string
+    (``HI-Small_res20``, ``HI-Small_nolouvain``), so every arm arrives here
+    as a separate "dataset". Adding ``base_dataset`` and ``resolution``
+    columns is what lets a table put the setting on an axis instead of
+    scattering it across five unrelated tables.
+
+    ``resolution`` is the string ``"off"`` for the no-Louvain arm rather
+    than NaN: it is a real setting that produced real numbers, and a NaN
+    would be dropped by the pivot and silently vanish from the comparison.
+    """
+    if df.empty:
+        return df.assign(base_dataset=[], resolution=[])
+
+    parsed = [parse_resolution(name) for name in df["dataset"]]
+    return df.assign(
+        base_dataset=[base for base, _ in parsed],
+        resolution=["off" if res is None else res for _, res in parsed])
+
+
+def _resolution_order(values):
+    """Sweep columns in order of how much they reduce the graph.
+
+    ``off`` first (nothing removed), then ascending resolution, because
+    that is the axis the reader is actually following: higher resolution
+    means smaller communities and more inter-community edges discarded.
+    Sorting these as strings would put ``"10"`` before ``"5"``.
+    """
+    numeric = sorted(v for v in values if v != "off")
+    return (["off"] if "off" in set(values) else []) + numeric
+
+
+def sweep_table(df, dataset, direction, metric="AUC_PR", features="full",
+                cutoffs=None, targets=None, n_folds=None, latex=True):
+    """P4 / R2-M3: downstream performance against the Louvain setting.
+
+    Rows are (model, pattern, cut-off); columns are the resolution, with the
+    no-Louvain arm first. ``dataset`` is the **base** name (``HI-Small``),
+    not one arm of the sweep -- every arm is gathered by
+    :func:`louvain_setting`.
+
+    Restricted to the published feature configuration by default: the
+    question here is whether the *pre-processing* choice moves the result,
+    so varying the feature groups at the same time would confound the two
+    sensitivities the revision reports separately.
+    """
+    cutoffs = HEADLINE_CUTOFFS if cutoffs is None else cutoffs
+    targets = HEADLINE_TARGETS if targets is None else targets
+
+    sub = louvain_setting(model_rows(df))
+    sub = sub[(sub["base_dataset"] == dataset) & (sub["direction"] == direction)
+              & (sub["metric"] == metric) & (sub["features"] == features)
+              & sub["cutoff"].isin(cutoffs) & sub["target"].isin(targets)]
+    if sub.empty or sub["resolution"].nunique() < 2:
+        return pd.DataFrame()
+
+    summary = summarise(sub, group_keys=GROUP_KEYS + ["resolution"])
+    summary["variant"] = [
+        model_label(m, f) for m, f in zip(summary["model"], summary["features"])]
+    summary = summary.sort_values(
+        "model", key=lambda s: s.map(_model_sort_key), kind="mergesort")
+
+    # Bolding per row would mark the best resolution for each cell, which is
+    # exactly the wrong reading: the sweep is asking whether the choice
+    # matters, not inviting one to be selected on the test data.
+    table = _pivot(summary, index=["variant", "target", "cutoff"],
+                   columns="resolution", n_folds=n_folds, bold_max=False,
+                   latex=latex)
+    table = table.reindex(columns=_resolution_order(table.columns))
+    table.columns = [("no Louvain" if c == "off" else
+                      f"r={c:g}" + (" (published)" if c == DEFAULT_RESOLUTION else ""))
+                     for c in table.columns]
+    return table
+
+
+def severance_table(results_dir="results", latex=True):
+    """P4 / R2-M3: the percentage of edges the pre-processing discards.
+
+    Reads ``results/louvain_severance.csv``, which the measure scripts
+    append to on every run. That file is an append-only log, so a dataset
+    re-run at the same setting appears twice; the last row wins, being the
+    one that produced the measures currently on disk.
+    """
+    path = os.path.join(results_dir, "louvain_severance.csv")
+    if not os.path.exists(path):
+        return pd.DataFrame()
+
+    log = pd.read_csv(path)
+    if log.empty:
+        return pd.DataFrame()
+
+    log["dataset"] = [parse_resolution(d)[0] for d in log["dataset"]]
+    log = log.drop_duplicates(subset=["dataset", "resolution"], keep="last")
+
+    # "off" arrives as a string and the resolutions as floats, so the column
+    # is object-typed; coerce the numeric ones back for a sensible order.
+    log["resolution"] = [v if v == "off" else float(v) for v in log["resolution"]]
+
+    table = log.pivot_table(index="dataset", columns="resolution",
+                            values="pct_severed", aggfunc="last")
+    table = table.reindex(columns=_resolution_order(table.columns))
+    # Series.map rather than DataFrame.map/applymap: the former is stable
+    # across pandas versions, while DataFrame.map only exists from 2.1 and
+    # applymap is deprecated from the same release.
+    table = table.apply(lambda column: column.map(
+        lambda v: "--" if pd.isna(v)
+        else format_cell(v, digits=2, latex=latex, basis="single")))
+    table.columns = [("no Louvain" if c == "off" else
+                      f"r={c:g}" + (" (published)" if c == DEFAULT_RESOLUTION else ""))
+                     for c in table.columns]
+    table.index.name = None
+    return table
 
 
 def variance_table(df, dataset, metric="AUC_PR", n_folds=None, latex=True):

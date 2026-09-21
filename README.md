@@ -68,7 +68,7 @@ python scripts/gargaml_tree.py         # stage 2: train + evaluate -> results/
 | Partial-observability appendix: score on the full graph vs a bank's view | `scripts/partial_observability.py` | `results/<view>_partial_observability_accounts.csv`, `..._metrics.csv` |
 | Appendix tables and figures | `notebooks/BankObservability.ipynb` | `results/appendix_*.csv`, `results/appendix_*.pdf` |
 | Directed-vs-undirected diagnosis | `scripts/directed_diagnosis.py` | `results/<dataset>_directed_diagnosis.csv` (per node: level census, reciprocal census, five score variants), `..._summary.csv` (means by ground-truth class and structural role), `..._directed_diagnosis_metrics.csv` (each variant through the shared metrics), and the pooled `results/directed_diagnosis_{summary,metrics}.csv` |
-| Revision tables: results, ablation, alert queue, fold variance, cost | `scripts/build_tables.py` | `results/table_*.tex` and a `.csv` twin of each, plus `results/table_coverage.csv` saying which model/config combinations are on disk and whether they predate the cross-validation |
+| Revision tables: results, ablation, alert queue, fold variance, cost, Louvain sweep and edge severance | `scripts/build_tables.py` | `results/table_*.tex` and a `.csv` twin of each, plus `results/table_coverage.csv` saying which model/config combinations are on disk and whether they predate the cross-validation |
 | Tree / boosting / GraphSAGE under a bank view | the model scripts above, run on a view name | the same files, under `results/<dataset>_bank<b>_*` |
 
 FlowScope and AutoAudit are not run from this repository (see *Experimental

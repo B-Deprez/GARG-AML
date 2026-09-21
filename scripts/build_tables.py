@@ -26,6 +26,14 @@ What it writes, and which reviewer point each answers
     Fold mean +/- std, with the fold count behind each mean.
 ``table_cost_<dataset>``   (P1, scalability)
     GraphSAGE fit / inference seconds and peak host and GPU memory.
+``table_sweep_<dataset>_<direction>_<metric>``   (P4, R2-M3)
+    Downstream performance against the Louvain resolution, with the
+    no-Louvain arm first. Only written once at least two settings are on
+    disk -- run the measure scripts on the ``_res<r>`` / ``_nolouvain``
+    dataset names first.
+``table_severance``   (P4, R2-M3)
+    Percentage of edges the pre-processing discards, per dataset and
+    setting, from ``results/louvain_severance.csv``.
 
 Before the tables, it prints a coverage report. Read it first: while the
 re-runs are outstanding most cells come from the 15 Sep single-split grid,
@@ -52,7 +60,8 @@ import pandas as pd
 from src.utils.reporting import (HEADLINE_CUTOFFS, HEADLINE_TARGETS,
                                  ablation_table, alert_table, coverage,
                                  cost_table, load_metrics, results_table,
-                                 ties_table, variance_table, write_table)
+                                 severance_table, sweep_table, ties_table,
+                                 variance_table, write_table)
 
 # The datasets to build tables for. A missing one is skipped with a message,
 # so leaving LI-Large here before its run finishes costs nothing.
@@ -170,6 +179,39 @@ def build_alert_tables(df, dataset, written):
             print("  ties ("+target+" @"+str(cutoff)+"): "+str(ties.shape))
 
 
+def build_sweep_tables(df, dataset, written):
+    """Task 4's resolution sweep, one table per (direction, metric).
+
+    Silently absent until at least two Louvain settings have been run --
+    sweep_table returns empty rather than presenting a single arm as a
+    sensitivity analysis.
+    """
+    for direction in DIRECTIONS:
+        for metric in METRICS:
+            table = sweep_table(df, dataset, direction, metric=metric,
+                                n_folds=N_FOLDS)
+            if table.empty:
+                continue
+            written += write_table(
+                table, f"sweep_{dataset}_{direction}_{metric}",
+                caption=(f"Sensitivity of {metric.replace('_', '-')} to the "
+                         f"Louvain pre-processing, {direction} {dataset}. "
+                         "Columns run from no reduction at all to the most "
+                         "aggressive setting; \emph{{r=10}} is the published "
+                         "choice. The published feature configuration is used "
+                         "throughout, so this isolates the pre-processing from "
+                         "the feature-group sensitivity reported separately."),
+                label=f"tab:sweep-{dataset.lower()}-{direction}-{metric.lower()}",
+                note=("Cells are deliberately not bolded: the question is "
+                      "whether the choice of resolution moves the result, not "
+                      "which resolution to select on the evaluation data."),
+                # Three index levels of long model labels plus a column per
+                # setting overflows \textwidth well before the column count
+                # alone would trigger the automatic promotion.
+                wide=True)
+            print("  sweep ("+direction+", "+metric+"): "+str(table.shape))
+
+
 def build_dataset(df, dataset, written):
     if df[df["dataset"] == dataset].empty:
         print("\n### "+dataset+" -- SKIPPED: no tidy metrics on disk ###")
@@ -179,6 +221,7 @@ def build_dataset(df, dataset, written):
     build_results_tables(df, dataset, written)
     build_ablation_tables(df, dataset, written)
     build_alert_tables(df, dataset, written)
+    build_sweep_tables(df, dataset, written)
 
     for metric in METRICS:
         table = variance_table(df, dataset, metric=metric, n_folds=N_FOLDS)
@@ -227,6 +270,26 @@ def main():
     report.to_csv("results/table_coverage.csv", index=False)
 
     written = []
+
+    # Edge severance is per (dataset, setting) and comes from the measure
+    # scripts' own log, not from the metrics, so it is built once rather
+    # than inside the per-dataset loop.
+    severance = severance_table()
+    if severance.empty:
+        print("\nNo results/louvain_severance.csv yet -- run a measure script "
+              "to record how much the Louvain step discards (task 4).")
+    else:
+        written += write_table(
+            severance, "severance",
+            caption=("Percentage of edges discarded by the Louvain "
+                     "pre-processing, per dataset and resolution. "
+                     "\emph{{r=10}} is the published choice."),
+            label="tab:severance",
+            note=("Every inter-community edge is dropped before scoring, so "
+                  "this is the fraction of the graph the second-order "
+                  "neighbourhoods never see."))
+        print("\nseverance: "+str(severance.shape))
+
     for dataset in DATASETS:
         build_dataset(df, dataset, written)
 
