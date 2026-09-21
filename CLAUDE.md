@@ -27,19 +27,32 @@ mix the two indices (code task 12 = model naming, P12 = the typo lists).
 
 **Branch:** work on the revision branch (`revision-jfds`), never on `main` (protected).
 
-**Task ordering is not free.** Three tasks have hard dependencies:
+**Task ordering is not free.** Three tasks have hard dependencies. All three are now
+code-complete; the chain still governs **re-runs** — a tree/boost re-run picks up
+task 3's configs and reports through task 2's module, and GraphSAGE consumes task 7's
+folds:
 
-1. **Task 2 first** — the ranking-metrics module (Precision@K, Recall@K, AP, lift,
-   TP@top-N). Not started in code, but **fully specified**: see "Design (agreed)" under
-   §2 of `GARG-AML_code_changes.md` for the settled API, output schema and retrofit list.
-   Implement that, do not redesign it. The module goes in **`src/utils/evaluation.py`**
-   (beside `naming.py`); every script currently defines its own `evaluate_model` and all
-   six must route through it. Do not let a new model build its own parallel evaluation
-   path — note that `scripts/gargaml_tree_blocks.py` already did, and folding it back in
-   is part of the task. Two invariants worth repeating here: `evaluate_model` returns a
-   **dict**, and the shared writer must keep emitting today's
-   `<dataset>_<metric>_<model>_<direction>_combined.csv` files unchanged so the
-   visualisation notebooks need no edits.
+1. **Task 2 — DONE.** The ranking-metrics module is **`src/utils/evaluation.py`**
+   (beside `naming.py`): Precision@K, Recall@K, lift@K, TP@K and a tie diagnostic at
+   `ALERT_SIZES = [50, 100, 500, 1000]`, beside the legacy precision / F1 / AUC-ROC /
+   AUC-PR. No script defines its own `evaluate_model` any more — all six route through
+   it (commit `cf07af0` plus the five retrofits), including `gargaml_tree_blocks.py`,
+   whose parallel evaluation path was folded back in. Do not let a new model build
+   another one. Four facts to carry forward:
+   - `evaluate_model` returns a **dict**, not the 4-tuple the scripts used to unpack.
+   - The writer still emits today's `<dataset>_<metric>_<model>_<direction>_combined.csv`
+     matrices unchanged, so the visualisation notebooks needed no edits.
+   - Those matrices carry the **legacy four metrics only** (`LEGACY_METRICS`). The
+     ranking metrics live in the tidy `<dataset>_<direction><suffix>_metrics.csv` that
+     `write_metrics` writes beside them, long-form with a separate `K` column.
+   - `LEGACY_MODEL_TOKENS` is a deliberate allow-list: a model key with no entry raises
+     rather than writing an orphan CSV no notebook reads, so **add a token when you add
+     a model**.
+
+   **What is outstanding is the reporting, not the code.** The tree grid's ranking
+   metrics on disk come from the 15 Sep single-split (70/30) run — the tidy files have
+   no `fold` column — so they predate task 7's CV and have to be regenerated before they
+   can go in the paper. P2 is answered in code and unanswered on paper until then.
 2. **Task 3 — DONE.** The feature matrix is split into four separable column groups in
    **`src/utils/features.py`** (a: score, b: block densities+sizes, c: own+neighbour
    degree stats, d: neighbour score stats) and four named configs: `full` (published),
@@ -51,28 +64,90 @@ mix the two indices (code task 12 = model naming, P12 = the typo lists).
    **`topology` is direction-free**, because group (c) is computed on the undirected
    reduced graph either way, so it runs once (`is_direction_free()`), not once per
    direction.
-3. **Task 1 third** — the GraphSAGE baseline (`pytorch-geometric`). Not started; no
-   torch / torch-geometric in `requirements.txt` yet. Highest compute risk; get one
-   HI-Small run working end to end before queuing LI-Large on VSC.
+3. **Task 1 third — code DONE, runs outstanding.** The GraphSAGE baseline lives in
+   `src/methods/graphsage.py` + `scripts/graphsage_baseline.py`, with both feature
+   configs (`topology` = degree/log-degree strict parity, `attributes` = + amount,
+   count, currency, bank and timing aggregates), early stopping on validation AUC-PR
+   off a 10% slice carved from the *training* fold, per-epoch checkpointing, and
+   separate preprocessing / fit / inference timing plus peak host and GPU memory.
+   `torch` / `torch-geometric` are in `requirements.txt`. **Never** feed it GARG-AML
+   scores, block densities or block sizes — that rule holds by construction here:
+   both configs are built from the raw transaction file, never from
+   `results/*_GARGAML_*.csv`.
 
-Remaining tasks (4–13) are largely independent loops over the existing pipeline. Two of
+   Two facts to carry forward. The graph structure is built **without NetworkX** by
+   default (`backend="pandas"` in `build_graph_structure`) — verified to produce an
+   identical node and edge set to `construct_IBM_graph` on HI-Small, at ~3.5x the
+   speed, and it is what makes LI-Large's 176M edges plausible. And the sweep is a
+   **logged reduction**, not the full grid: 3 cut-offs x 3 targets x 5 folds x 2
+   configs = 90 fits on HI-Small, matching task 1's own arithmetic, because a GNN fit
+   is minutes where a tree is seconds. Widen `DATASETS` in the script if the budget
+   allows; do not quietly assume the tree models' 5 x 9 grid was run here.
+
+Remaining tasks (4–13) are largely independent loops over the existing pipeline. Three of
 them already have work on disk:
 
 - **Task 4** — `notebooks/LouvainEdgeSeverance.ipynb` quantifies the % of edges severed
   on every dataset, but only at `resolution = 10`. The resolution sweep, the
   split-pattern diagnostic and the no-Louvain run are still open.
+- **Task 5** — code DONE, appendix runs in progress; full design in
+  `GARG-AML_code_changes.md` §5. Two separable pieces:
+
+  *The view mechanism.* A view is filtered on the **bank fields**
+  (`From Bank == b or To Bank == b`), which selects a transaction set identical to
+  client-membership filtering (verified, 0 differing rows) at a fraction of the cost.
+  The **evaluated population is the bank's own clients**, which makes their labels
+  identical to the full-data labels — a bank sees every transaction of its own clients —
+  so only the features degrade. A view is addressed as a **dataset string**
+  `<dataset>_bank<b>`, already threaded into every output path, so `evaluation.py`,
+  `features.py` and `naming.py` need no changes and the full-data filenames stay
+  byte-identical. `bank_views.resolve_banks` also expands a `"top<k>"` group spec into
+  the k largest banks pooled as one institution.
+
+  *The appendix experiment* (`scripts/partial_observability.py`) compares the **pure
+  GARG-AML score** on the full graph vs the bank view, for the institution's clients
+  only, **with Louvain off on both sides** — otherwise the two regimes are reduced by
+  different partitions and the degradation cannot be attributed to missing edges. That
+  makes its `full` column deliberately *not* the published Tables 10-11 number; say so
+  wherever it is reported. Four measured facts to carry forward:
+  - **N₁ survival is exactly 1.000 and N₂ survival is 0.069** (median 0.0099) on bank
+    `012`; 53% of its clients lose their entire second-order neighbourhood. An earlier
+    figure of ~21% was wrong — it counted everything within distance 2, so it included
+    the fully-preserved N₁.
+  - **The view biases the score upward**, it does not merely add noise: on `degree >= 3`
+    clients the mean score rises +0.206 → +0.451, because losing N₂ empties the
+    penalty blocks. More false positives, not just worse ranking.
+  - **There is no "smallest bank"** worth running — 6,193 of 30,528 HI-Small banks have
+    one client — and the *largest* holds only 0.512% of accounts, which is why the
+    pooled `top50` (10.8%) carries the detection claim.
+  - **The score is heavily tied** on one institution's clients (522 of `012`'s 2,639
+    share exactly 1.0), so a raw top-K overlap between regimes is an artefact of sort
+    order. Report `ties@K` beside every ranking metric; the module already computes it.
 - **Task 12** — `src/utils/naming.py` is the canonical name map, used by the
   `DistributionScores`, `VisualisationResults` and `VisualisationRunTime` notebooks and
   now by `scripts/gargaml_tree.py` (via `gargaml_key()` / `pretty_config()`). Task 3 added
   `pretty_config()` for the ablations — note that the `topology` model is deliberately
-  **not** labelled "GARG-AML" (it contains none). Still open: an entry for GraphSAGE
-  (task 1).
+  **not** labelled "GARG-AML" (it contains none). Task 1 added `graphsage_u` plus
+  `MODEL_CONFIG_DISPLAY_NAMES`, which lets a model whose feature configs are its own
+  thing (rather than a task-3 ablation) carry deliberate labels; it is checked before
+  the `topology` rule, so "GraphSAGE (topology)" does not collide with the
+  degree-only tree ablation's name.
 
-**Before committing:** strip Jupyter notebook outputs (`nbstripout` or manual). Output
-cells previously caused an HTTP 400 push failure on this repo. This is *not* automated
-today — there is no `.gitattributes` and no `filter.nbstripout.clean` git config — and
-four tracked notebooks (`VisualisationResults`, `LouvainEdgeSeverance`, `toyexample`,
-`VisualisationRunTime`) still carry outputs. Strip before touching them.
+**Notebook outputs are stripped automatically (task 13).** `.gitattributes` declares a
+`nbstrip` clean filter for `*.ipynb`, implemented by `scripts/nbstrip.py` (standard
+library only, so the filter has no install step). Git does not let a repository set the
+filter *command* itself, so each clone registers it once:
+
+```bash
+git config filter.nbstrip.clean "python scripts/nbstrip.py --filter"
+git config filter.nbstrip.smudge cat
+```
+
+This is already configured in the working clone, and the six tracked notebooks were
+renormalised through it (2.7 MB → 126 KB). Working copies keep their rendered outputs;
+only what git stores is stripped. `python scripts/nbstrip.py --check notebooks/` reports
+what is not clean — note it also walks the gitignored exploratory notebooks, and the
+in-place mode would strip those too, so prefer `--check` unless you mean it.
 
 ### Settings that are becoming parameters
 
@@ -83,8 +158,79 @@ revision. Do not add new hard-coded uses of them:
 |---|---|
 | Louvain `resolution = 10` | Already a keyword argument (`graph_community(G, resolution=10)`); every call site takes the default and `LouvainEdgeSeverance.ipynb` hardcodes 10. Task 4 sweeps it — thread the value through the call sites, do not add new literals |
 | 70/30 single split | Task 7 replaces it with **5-fold stratified CV on the IBM data only** — split logic must offer both `holdout_split` (synthetic, unchanged) and `cv_splits`; the fold partition is persisted to `results/<dataset>_folds.csv` and reused by GraphSAGE |
-| Label cut-off list | Task 2 adds threshold-free ranking metrics alongside |
+| Label cut-off list | Task 2 **done** — the threshold-free ranking metrics (P@K, R@K, lift@K, TP@K, AP) are reported alongside the swept cut-offs; report through `evaluation.py`, do not add a parallel metric path |
+| Full-graph view (no bank filter) | Task 5 adds single-bank views — `construct_IBM_graph(..., banks=None)` and `define_ML_labels(..., banks=None)` keep today's behaviour by default; a view is named `<dataset>_bank<b>` (or `<dataset>_banktop<k>` for a pooled institution) and flows through as the `dataset` string. Do not special-case views downstream |
 | Model names (`gargaml tree undirected` vs `GARG-AML Undir. Tree`) | Task 12 standardises — `src/utils/naming.py` is the one canonical scheme; route new labels through `pretty()`, or `pretty_config()` when a task-3 feature config is involved |
+
+### Stale results on disk — every directed synthetic measure file
+
+Commit `c5fba86` (2025-10-31, "bug fix") changed `measure_12_function`: an empty
+block used to return density **1** unconditionally, and now returns 1 only when
+`size_2 > 0`, else 0. `measure_12` is one of the two blocks Eq. 14 expects to be
+*dense*, so the old behaviour handed full credit to nodes with no level-2
+neighbours at all — inflating the directed score for exactly the nodes that are
+least smurfing-like.
+
+**Every directed synthetic measure file on disk still holds the pre-fix values**,
+in all three results directories:
+
+| Directory | Files | Date | Values |
+|---|---|---|---|
+| `results/` | 10 | Jan / Apr 2025 | pre-fix |
+| `results-0/` | 66 | Apr 2025 | pre-fix |
+| `results-3/` | 66 | Nov 2025 | pre-fix — **byte-identical to `results-0`**, so copied, not recomputed |
+
+Do not trust the file dates: `results-3` postdates the fix and still contains the
+old numbers. Verified by value, not by timestamp — the archives carry
+`measure_12 = 1.0` where the current code gives `0.0`, on 67–84 % of nodes in the
+datasets checked.
+
+Effect on the directed score (`weighted_average`, three 100-node datasets):
+scores shift **down** by 0.04–0.13 on average (up to 0.70 for one node), Spearman
+correlation with the old ranking is 0.88–0.99, but **top-20 overlap is only
+6/20 to 19/20** — the head of the ranking, which is what the tree models and the
+alerting metrics use, moves materially on some datasets.
+
+The undirected files are unaffected; the bug was directed-only.
+
+**This bears on task 6.** The open question is why the directed score
+underperforms the undirected one. A defect that inflated directed scores for
+non-smurfing nodes, fixed in code in October 2025 but never reflected in any
+stored result, is a plausible contributor — every directed synthetic number
+reported so far was computed with it. Regenerating before instrumenting Eq. 11
+is worthwhile.
+
+**Decided (2026-09-21): keep the fix, regenerate the results.** `c5fba86` stays;
+the directed synthetic measures are to be recomputed so the stored numbers match
+the code. Do **not** revert `measure_12_function` to make the archives match.
+
+Regeneration cost, from `results-0`'s own `time_results_dir*.txt`:
+
+| Size | Datasets | Median | Subtotal |
+|---|---|---|---|
+| 100 | 22 | seconds | negligible |
+| 10,000 | 22 | 4.1 min | ~1.6 h |
+| 100,000 | 22 | 9.8 h | **~175–210 h** |
+
+So 44 of the 66 datasets cost under two hours and the remaining 22 cost about
+nine days of wall-clock — roughly 14 jobs against the 16 h VSC budget. Do the
+100 and 10,000-node tiers first and see whether the directed average rank moves
+at all before committing to the large tier. Note the Friedman/Nemenyi test is
+specified over N=66, so a partial regeneration cannot be the final reported
+number; it is a decision aid.
+
+Then re-run downstream: `gargaml_tree_synthetic{,_3,_5}.py`, and rebuild the CD
+diagrams and rank tables in `VisualisationResults.ipynb`. Back up `results*/`
+first — the measure scripts overwrite in place.
+
+**Unexplained, and worth checking before citing any runtime.**
+`results-3/time_results_dir.txt` records 18 s – 10 min for the same
+100,000-node datasets that `results-0` recorded at 8–11 h, while
+`results-3`'s directed measure CSVs are byte-identical to `results-0`'s. Those
+two facts cannot both describe one run: either `results-3`'s files were copied
+in and its timings belong to something else, or its run did far less work. If
+the runtime figure (Fig. 6) or any scalability claim draws on `results-3`,
+confirm which run produced the numbers.
 
 ### Do not "fix" these
 
@@ -94,20 +240,21 @@ revision. Do not add new hard-coded uses of them:
 - The GNN baseline must **never** receive GARG-AML scores, block densities, or block
   sizes as features. That would destroy the ablation's meaning.
 
-### Known defect — fix as part of task 2
+### Fixed defect — do not reintroduce
 
-`evaluate_model` in `gargaml_tree.py`, `gargaml_tree_blocks.py` and all three
-`gargaml_tree_synthetic*.py` computes AUC-ROC and AUC-PR from `clf.predict()` (hard 0/1
-labels) rather than `predict_proba`. AUC-PR is the paper's primary threshold-free metric,
-and the ranking metrics of task 2 (P@K, lift, TP@top-N) all need a continuous score, so
-the new evaluation module must take scores, not labels.
-
-Still live — all five call sites are unfixed. The fix lands in one place,
+`evaluate_model` used to compute AUC-ROC and AUC-PR from `clf.predict()` (hard 0/1
+labels) rather than `predict_proba`, in `gargaml_tree.py`, `gargaml_tree_blocks.py` and
+all three `gargaml_tree_synthetic*.py`. **Fixed in one place** by task 2:
 `src/utils/evaluation.py::model_scores` (`predict_proba[:, 1]`, falling back to
-`decision_function`, then `-score_samples` for the isolation forest). Note that this also
-*delivers* one of the metrics the reviewers ask for rather than adding it:
-`average_precision_score` already **is** average precision, so it is the existing
-`AUC_PR` column computed correctly, not a new column.
+`decision_function`, then `-score_samples` for the isolation forest — outlier detectors
+are matched *before* `decision_function`, because `IsolationForest` exposes both). All
+five call sites now go through it; any new evaluation path must take scores, not labels.
+
+Two consequences to keep in mind. The fix *delivers* one of the metrics the reviewers
+ask for rather than adding it: `average_precision_score` already **is** average
+precision, so it is the existing `AUC_PR` column computed correctly, not a new column.
+And AUC numbers produced before the fix are **not comparable** with numbers after it —
+same column name, different quantity.
 
 ---
 
@@ -177,13 +324,35 @@ block grid yields `measure_00` … `measure_22`. Final score (Eq. 14):
 mean(score01, score12) − mean(score00, score02, score10, score11, score20, score21, score22)
 ```
 
-`GARG_AML_node_directed` computes this for the graph and its transpose and keeps the
-**max**, catching reverse-flow orientation. Range **[−1, 1]**.
+Range **[−1, 1]**. Eq. 14 is the whole score: there is **no max-with-transpose
+step** in §3.3. Reverse flow is handled one level up, in the level assignment —
+Eq. 11 plus "we repeat this selection on the reversed network", so a node at
+distance two sits at level 0 when no directed path of length two reaches it in
+*either* direction. That is what the `nodes_2_s` / `nodes_2_rs` set difference in
+`GARG_AML_nodeselection_directed` implements.
+
+`GARG_AML_node_directed` additionally takes `max(score, score_transposed)`. That
+extra step has no counterpart in the paper, and it is **dead code**: its only
+caller is the unused serial `GARG_AML(G)`. The pipeline scores through
+`define_gargaml_scores` and uses the `GARGAML` column, which is Eq. 14 exactly.
+Do not "restore" the max, and do not treat it as the paper's reverse-flow
+handling — verified against §3.3 on 2026-09-18, and the two quantities differ
+for 205 of 245 nodes on a 245-node synthetic graph, so the distinction is not
+cosmetic.
+
+**`GARGAML_max` is two different columns.** `define_gargaml_scores_directed`
+emits it as the transpose-max; `combine_GARG_AML` emits it as the *neighbour*
+max. In `gargaml_tree.py` the second overwrites the first, which is harmless
+because only the neighbour max is ever a feature — but never assume which one a
+frame holds.
 
 > Reviewer note (see `GARG-AML_review_feedback.md`, R2 major 2): the undirected score
 > outperforms the directed one, and task 6 investigates why — either benign
 > bidirectional edges are over-penalised, or the level-assignment rule (Eq. 11) is too
-> strict. Expect to instrument this code.
+> strict. Expect to instrument this code. The missing transpose-max is **not** a
+> candidate explanation: it is absent from the paper and was never in the
+> pipeline. Eq. 11 is where all the directional logic sits, so that is the more
+> promising of the two hypotheses to instrument.
 
 Runnable scripts persist all raw block measures + block sizes;
 `src/methods/gargaml_scores.py` converts them into the final score
@@ -222,13 +391,17 @@ touches exactly this boundary.
 ```
 src/
   data/
-    graph_construction.py     # CSV -> NetworkX graph
+    graph_construction.py     # CSV -> NetworkX graph (bank= selects a single-bank view)
     pattern_construction.py   # parse *_Patterns.txt -> per-node AML labels
     synthetic_smurfing.py     # generate synthetic graphs (igraph) + injected patterns
+    bank_views.py             # single-bank views (task 5): view_name(), bank_mask(),
+                              #   bank_clients(), chunked client_counts() for LI-Large
     dataprep_vsc.py           # split/recombine the huge LI-Large CSV
   methods/
     GARGAML.py                # core: per-node block measures + score (entry: GARG_AML)
     gargaml_scores.py         # block measures -> "basic" / "weighted_average" scores
+    graphsage.py              # GraphSAGE baseline (task 1): structure + feature build,
+                              #   model, early-stopped training, timed inference
     utils/
       measure_functions_undirected.py   # the 3 undirected block-density measures
       measure_functions_directed.py     # the 9 directed block-density measures
@@ -237,6 +410,8 @@ src/
     graph_processing.py       # graph_community() (Louvain filter), graph_degree() (hub removal)
     naming.py                 # canonical model names (task 12): MODEL_DISPLAY_NAMES, pretty(),
                               #   pretty_config() for the task-3 ablation labels
+    hyperparameters.py        # hyperparameter provenance (task 9): every estimator's
+                              #   configuration, sklearn defaults read at runtime
     evaluation.py             # shared metrics/splits/result writing (task 2)
     features.py               # the four feature groups + configs (task 3): feature_columns(),
                               #   is_direction_free(), feature_schema()
@@ -254,14 +429,19 @@ scripts/                      # runnable entry points — run from repo ROOT
   gargaml_tree_synthetic_5.py # …with 5 injected patterns
   gargaml_IF.py               # isolation forest (unsupervised)
   gargaml_link_label.py       # edge-/link-level labelling
+  partial_observability.py    # task 5 appendix: pure GARG-AML score, full graph vs
+                              #   single-bank view, no Louvain, clients only
   distribution_scores.py      # score-distribution analysis/plots
   test_parallel.py            # multiprocessing sanity check, not part of the pipeline
+  nbstrip.py                  # notebook-output clean filter (task 13), not part of the
+                              #   pipeline; stdlib only, see §8
 
 notebooks/                    # exploratory analysis & paper figures (run from repo root)
-                              # only 6 are tracked; the exploratory ones are gitignored
+                              # only 7 are tracked; the exploratory ones are gitignored
                               # by name — see .gitignore
+                              # BankObservability.ipynb is task 5's bank-size analysis
 requirements.txt              # networkx>=3.0, pandas, numpy, scikit-learn, matplotlib,
-                              # tqdm, igraph. No torch/torch-geometric yet (task 1)
+                              # tqdm, igraph, torch, torch-geometric (task 1)
 Figure A1–A6.pdf              # appendix figures, committed at repo root
 data/                         # NOT in git — place datasets here yourself
 results*/, res/               # NOT in git — generated outputs
@@ -340,7 +520,7 @@ sweep `[0.1, 0.2, 0.3, 0.5, 0.9]`, paper headlines 0.1 / 0.5 / 0.9. Imbalance is
   GraphSAGE, which does live in this repo.
 - Metrics: precision, F1, AUC-ROC, AUC-PR, plus average rank across the 66 synthetic
   datasets via Friedman + post-hoc Nemenyi (k=8, N=66, α=0.05), shown as
-  critical-difference diagrams. Task 2 adds ranking metrics; task 8 adds the χ²/p-value
+  critical-difference diagrams. Task 2 has added the ranking metrics (`src/utils/evaluation.py`); task 8 adds the χ²/p-value
   reporting the reviewers asked for.
 - Compute envelope for the largest runs: 16 h VSC budget, 200 GB.
 
@@ -357,9 +537,10 @@ AutoAudit exhausts memory/time.
 ## 8. Version control
 
 Committed: `src/`, `scripts/`, README/LICENSE, paper figures (`Figure*.pdf`, currently
-`FigureA1`–`FigureA6`), the smurfing diagram, and the six notebooks that produce paper
+`FigureA1`–`FigureA6`), the smurfing diagram, and the seven notebooks that produce paper
 figures/analysis (`toyexample`, `VisualisationResults`, `VisualisationRunTime`,
-`VisualisationNetwork`, `DistributionScores`, `LouvainEdgeSeverance`). Ignored: all of
+`VisualisationNetwork`, `DistributionScores`, `LouvainEdgeSeverance`,
+`BankObservability`). Ignored: all of
 `data/`, `results*/` and `res/`, trained models (`*.pkl`), GraphViz exports (`*.dot`),
 scratch plots, caches, `.DS_Store`, `initial_code.py`, the exploratory notebooks
 (`AnalysisData`, `AnalysisParallel`, `AnalysisSyntheticData`, `AnomalousPatterns`,
@@ -367,6 +548,11 @@ scratch plots, caches, `.DS_Store`, `initial_code.py`, the exploratory notebooks
 (`GARG-AML_review_feedback.md`, `GARG-AML_code_changes.md`) — these are internal and
 must not be pushed. Rationale is inline in `.gitignore`.
 
-The README currently lacks a reproduction map, and the manuscript claims "Code ✓" without
-a repo link (R2 minor 4, task 13) — when adding new experiments, document in the README
-which script reproduces which table or figure.
+The README now carries a reproduction map (task 13): a "Reproducing the results" section
+mapping each script/notebook to the files it writes, plus the experimental settings
+(seeds, the `N_FOLDS` switch, feature configs, hyperparameter provenance). Keep it
+current when adding experiments. Two things there are inferred rather than verified —
+the figure numbers for the CD diagrams (Figs. 10–11) and the runtime boxplot (Fig. 6)
+were matched by file size and timestamp, and the review notes refer to the CD diagrams
+as Figs. 8–9 from the earlier round; confirm against the submitted manuscript. Still
+open: the manuscript itself claims "Code ✓" without a repo link (R2 minor 4).
