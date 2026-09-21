@@ -70,6 +70,16 @@ TOPOLOGY_DISPLAY_NAMES: dict[str, str] = {
     "gargaml_boost_d": "Degree-only Boost",
 }
 
+# Feature configs that belong to one model rather than to the task-3
+# ablation family. GraphSAGE's two configs (task 1) are not ablations of a
+# GARG-AML feature matrix -- they are the strict-parity and deliberately
+# generous input sets the baseline is reported under -- so they get their own
+# labels instead of falling through to the "(config)" default.
+MODEL_CONFIG_DISPLAY_NAMES: dict[tuple[str, str], str] = {
+    ("graphsage_u", "topology"):   "GraphSAGE (topology)",
+    ("graphsage_u", "attributes"): "GraphSAGE (+ attributes)",
+}
+
 # Canonical column / legend / x-axis order. Keep this list aligned with
 # the order used in Tables 10-11: baselines first, then GARG-AML base
 # scores, then GARG-AML + tree, then GARG-AML + boost.
@@ -89,7 +99,9 @@ def pretty_config(key: str, config: str = "full") -> str:
     """Display name for model ``key`` trained on task-3 feature ``config``.
 
     ``config="full"`` reproduces :func:`pretty` exactly, so the published
-    labels are untouched. The ablations get a suffixed label, except
+    labels are untouched. A (key, config) pair in
+    :data:`MODEL_CONFIG_DISPLAY_NAMES` wins over every rule below it, for
+    models whose configs are their own thing rather than task-3 ablations. The ablations get a suffixed label, except
     ``topology``, which gets a name of its own for the reason documented on
     :data:`TOPOLOGY_DISPLAY_NAMES`.
 
@@ -98,6 +110,8 @@ def pretty_config(key: str, config: str = "full") -> str:
     not take down a results run. Unknown *keys* pass through as
     :func:`pretty` already does.
     """
+    if (key, config) in MODEL_CONFIG_DISPLAY_NAMES:
+        return MODEL_CONFIG_DISPLAY_NAMES[(key, config)]
     if config == "topology":
         return TOPOLOGY_DISPLAY_NAMES.get(key, pretty(key) + " (topology only)")
     if config in FEATURE_CONFIG_LABELS:
