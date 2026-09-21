@@ -56,6 +56,15 @@ initial_code.py
 GARG-AML_rejection_feedback.md
 GARG-AML_review_feedback.md
 GARG-AML_code_changes.md
+PACKAGING_PLAN.md
+
+# Packaging migration (Phase 0): the frozen-behaviour oracle and the two
+# scripts that build and verify it. These move to the garg-aml repo in Phase 1,
+# where they ARE committed -- they are the fixtures' provenance. They stay out
+# of this repo because it is the paper repo, not the library's.
+golden/
+scripts/make_golden.py
+scripts/check_golden.py
 
 # --- Exploratory / scratch notebooks ---------------------------------------
 # Only the notebooks that produce paper figures/analysis are tracked
