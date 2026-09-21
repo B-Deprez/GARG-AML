@@ -1,0 +1,20 @@
+# Notebook outputs never enter git (task 13).
+#
+# Committed outputs previously caused an HTTP 400 push failure on this
+# repository -- VisualisationResults.ipynb alone carries 2.1 MB of base64
+# figure data. The clean filter strips them on the way into the index;
+# the working copy keeps its rendered outputs, so nothing is lost locally.
+#
+# A filter defined here is inert until each clone registers the command
+# once (git does not let a repository configure that itself, by design):
+#
+#     git config filter.nbstrip.clean "python scripts/nbstrip.py --filter"
+#     git config filter.nbstrip.smudge cat
+#
+# Without it notebooks are committed as-is, which is the pre-existing
+# behaviour, not a breakage. See the README's "Notebook outputs" note.
+*.ipynb filter=nbstrip
+
+# Keep git from trying to diff or merge the generated figures.
+*.pdf binary
+*.png binary
