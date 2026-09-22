@@ -441,6 +441,28 @@ class GraphSAGEModel(torch.nn.Module):
 
 
 def get_device():
+    """The accelerator to train on: MPS locally, CUDA on the cluster, else CPU.
+
+    ``GARGAML_REQUIRE_GPU=1`` turns the CPU fallback into an immediate failure.
+    The Slurm GPU job sets it, because the fallback is silent: on an allocated
+    A100 a misconfigured torch burns the whole wall clock at a fraction of the
+    speed and reports fit/inference timings that are not what they claim to be.
+
+    The check asserts **CUDA specifically**, not "some accelerator". MPS is
+    preferred above and is the right answer on a Mac, but it can never be the
+    right answer on wice -- so accepting it here would defeat the guard.
+    """
+    if os.environ.get("GARGAML_REQUIRE_GPU", "").strip().lower() in ("1", "true", "yes", "on"):
+        if not torch.cuda.is_available():
+            mps = torch.backends.mps.is_available()
+            raise RuntimeError(
+                "GARGAML_REQUIRE_GPU=1 but torch.cuda.is_available() is False -- "
+                "found " + ("MPS" if mps else "CPU only") + ", torch " + torch.__version__
+                + " (cuda build: " + str(torch.version.cuda) + "). Refusing to train on "
+                "CPU with a GPU allocated. Check that the job requested --gpus-per-node "
+                "and that the conda env holds a CUDA-enabled torch."
+            )
+        return torch.device("cuda")
     if torch.backends.mps.is_available():
         return torch.device("mps")
     if torch.cuda.is_available():
