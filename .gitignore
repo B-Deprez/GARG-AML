@@ -58,6 +58,11 @@ GARG-AML_review_feedback.md
 GARG-AML_code_changes.md
 PACKAGING_PLAN.md
 
+# Working brief for building the VSC/Slurm harness: an instruction file written
+# to be handed to an agent, not documentation of the pipeline. The runbook that
+# IS meant to be read lives in slurm/README.md once that exists.
+VSC_SLURM_PROMPT.md
+
 # Packaging migration (Phase 0): the frozen-behaviour oracle and the two
 # scripts that build and verify it. These move to the garg-aml repo in Phase 1,
 # where they ARE committed -- they are the fixtures' provenance. They stay out
@@ -77,6 +82,15 @@ notebooks/AnalysisSyntheticData.ipynb
 notebooks/AnomalousPatterns.ipynb
 notebooks/TestCode.ipynb
 notebooks/Transfer.ipynb
+
+# --- Slurm job logs --------------------------------------------------------
+# The .slurm scripts write their stdout/stderr as plain files in the repo root,
+# beside the code, so a failed run is one `less` away without hunting through a
+# log directory. They are per-run output, not source, and an array job drops one
+# pair per task -- they would otherwise fill `git status` after every submission.
+# The harness itself (slurm/*.slurm, slurm/*.sh, slurm/README.md) IS tracked.
+*.out
+*.err
 
 # --- Python ----------------------------------------------------------------
 __pycache__/
