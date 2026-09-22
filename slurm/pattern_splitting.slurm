@@ -51,8 +51,9 @@ source activate gargaml
 
 source slurm/common.sh
 resolve_dataset "${1:-}"
+export GARGAML_RESULTS_DIR="${GARGAML_RESULTS_DIR:-results-revision}"
 
-echo "[$(date)] pattern_splitting: dataset=$GARGAML_DATASET resolutions=default(none,1,5,10,20,50)"
+echo "[$(date)] pattern_splitting: dataset=$GARGAML_DATASET resolutions=default(none,1,5,10,20,50) results_dir=$GARGAML_RESULTS_DIR"
 
 python -u scripts/pattern_splitting.py
 

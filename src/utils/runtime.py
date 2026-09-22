@@ -115,6 +115,17 @@ def select_datasets(default_datasets):
     return [default_datasets[index]]
 
 
+def resolve_results_dir(default="results"):
+    """``GARGAML_RESULTS_DIR`` override, or *default* when unset.
+
+    Every runnable script's own results/measures paths should be built from
+    this, not from a literal "results/" -- that is what lets a full rerun
+    land in a fresh folder (e.g. GARGAML_RESULTS_DIR=results-revision)
+    without touching the archives at results/, results-0/, results-3/.
+    """
+    return env_override("results_dir", default)
+
+
 def echo_config(script, **knobs):
     """Print the resolved run configuration, so the .out file reconstructs it.
 

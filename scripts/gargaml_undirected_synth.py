@@ -18,7 +18,7 @@ from src.data.graph_construction import construct_synthetic_graph
 from src.utils.graph_processing import graph_community
 from src.methods.GARGAML import GARG_AML_node_undirected_measures
 from src.utils.runtime import (env_override, select_datasets, echo_config,
-                              should_skip, write_csv, log_timing)
+                              should_skip, write_csv, log_timing, resolve_results_dir)
 
 # Global variable for worker processes
 graph_for_worker = None
@@ -95,14 +95,15 @@ n_cpu = min(4, cpu_count() // 2)
 # numbers the scalability figure reports, so it is a knob, not an auto-detect.
 datasets = select_datasets(datasets)
 n_cpu = env_override("n_cpu", n_cpu, int)
+RESULTS_DIR = resolve_results_dir()
 
 if __name__ == '__main__':
-    os.makedirs('results', exist_ok=True)
-    echo_config(__file__, datasets=datasets, directed=directed, n_cpu=n_cpu)
+    os.makedirs(RESULTS_DIR, exist_ok=True)
+    echo_config(__file__, datasets=datasets, directed=directed, n_cpu=n_cpu, results_dir=RESULTS_DIR)
 
     for dataset in datasets:
         print(f"\n=== Processing dataset: {dataset} ===")
-        out_path = f"results/{dataset}_GARGAML_undirected_parallel.csv"
+        out_path = f"{RESULTS_DIR}/{dataset}_GARGAML_undirected_parallel.csv"
         if should_skip(out_path, dataset):
             continue
         start_time = timeit.default_timer()
@@ -129,12 +130,12 @@ if __name__ == '__main__':
         elapsed = timeit.default_timer() - start_time
         print(f"Elapsed time: {elapsed:.2f} seconds")
         # Log timing
-        with open('results/time_results_undir.txt', 'a') as f:
+        with open(f'{RESULTS_DIR}/time_results_undir.txt', 'a') as f:
             f.write(f"{dataset}: {elapsed:.2f}\n")
         # Per-task timing beside the legacy append: the shared file records only
         # "<dataset>: <seconds>", which under an array job is both a race and
         # unattributable afterwards. slurm/collect.slurm concatenates these.
-        log_timing(dataset, "undirected", elapsed, n_cpu)
+        log_timing(dataset, "undirected", elapsed, n_cpu, results_dir=RESULTS_DIR)
 
         # Save DataFrame
         df = pd.DataFrame({
@@ -146,7 +147,7 @@ if __name__ == '__main__':
             "size_2": size_2_list,
             "size_3": size_3_list,
         })
-        out_path = f"results/{dataset}_GARGAML_undirected_parallel.csv"
+        out_path = f"{RESULTS_DIR}/{dataset}_GARGAML_undirected_parallel.csv"
         write_csv(df, out_path)
         print(f"Results saved to {out_path}")
     print("\nAll datasets processed successfully.")

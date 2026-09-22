@@ -40,7 +40,7 @@ from src.utils.features import (
 )
 from src.utils.hyperparameters import write_hyperparameters
 from src.utils.naming import gargaml_key, pretty_config
-from src.utils.runtime import env_override, select_datasets, echo_config
+from src.utils.runtime import env_override, select_datasets, echo_config, resolve_results_dir
 
 from sklearn import tree
 from sklearn import ensemble
@@ -143,8 +143,16 @@ N_FOLDS = 5
 # what a GraphSAGE test run should regenerate the fold partition with.
 DATASETS = select_datasets(DATASETS)
 N_FOLDS = env_override("n_folds", N_FOLDS, int)
+RESULTS_DIR = resolve_results_dir()
 
-def gargaml_tree(X, y, save = False, save_path = "results/model_tree.pkl"):
+# Defaults for gargaml_tree/gargaml_boosting's own save_path -- no caller in
+# this file passes save=True today, but the default must still land under
+# RESULTS_DIR rather than a hardcoded "results/" if one ever does.
+DEFAULT_TREE_SAVE_PATH = RESULTS_DIR+"/model_tree.pkl"
+DEFAULT_BOOST_SAVE_PATH = RESULTS_DIR+"/model_boosting.pkl"
+
+def gargaml_tree(X, y, save = False, save_path = None):
+    save_path = save_path or DEFAULT_TREE_SAVE_PATH
     # random_state is required, not cosmetic: sklearn permutes features at every
     # split, so when two splits tie on the criterion the winner is drawn at
     # random and an unseeded tree is not reproducible run to run. This script
@@ -161,7 +169,8 @@ def gargaml_tree(X, y, save = False, save_path = "results/model_tree.pkl"):
 
     return clf
 
-def gargaml_boosting(X, y, save = False, save_path = "results/model_boosting.pkl"):
+def gargaml_boosting(X, y, save = False, save_path = None):
+    save_path = save_path or DEFAULT_BOOST_SAVE_PATH
     clf = ensemble.GradientBoostingClassifier(min_samples_leaf=10, random_state=1997)
     clf = clf.fit(X, y)
 
@@ -173,7 +182,7 @@ def gargaml_boosting(X, y, save = False, save_path = "results/model_boosting.pkl
 
 def measures_path(dataset, directed):
     """Where stage 1 wrote ``dataset``'s block measures for this direction."""
-    return "results/"+dataset+"_GARGAML_"+("directed" if directed else "undirected")+".csv"
+    return RESULTS_DIR+"/"+dataset+"_GARGAML_"+("directed" if directed else "undirected")+".csv"
 
 def available_directions(dataset):
     """Directions of ``dataset`` whose stage-1 measures are actually on disk.
@@ -204,7 +213,7 @@ def reduced_graph(dataset):
     # name, so the neighbourhood features match the measures they are joined
     # to. dataset is not passed on: stage 1 already logged the severance and
     # this would duplicate the row.
-    return reduce_graph(G, parse_resolution(dataset)[1])
+    return reduce_graph(G, parse_resolution(dataset)[1], results_dir=RESULTS_DIR)
 
 def data_preparation(dataset, feature_cols, directed, score_type, G_reduced = None):
     """Build one feature table holding every column in ``feature_cols``.
@@ -334,7 +343,7 @@ def write_fold_partition(laundering_combined, dataset, cut_offs, targets, n_spli
                 for account in y.index[test_idx]:
                     rows.append(dict(account=account, cutoff=cutoff, target=target, fold=fold))
 
-    return write_folds(rows, dataset)
+    return write_folds(rows, dataset, results_dir=RESULTS_DIR)
 
 def run_config(laundering_combined, dataset, directed, config, seed=SEED,
                cut_offs=None, targets=None):
@@ -366,7 +375,7 @@ def run_config(laundering_combined, dataset, directed, config, seed=SEED,
             if (cut_offs, targets) != (CUT_OFFS, TARGET_COLUMNS) else ""))
 
     # Persist the feature schema for the appendix (task 10).
-    schema_path = "results/"+dataset+"_"+str_directed+suffix+"_feature_schema.csv"
+    schema_path = RESULTS_DIR+"/"+dataset+"_"+str_directed+suffix+"_feature_schema.csv"
     feature_schema(config, directed).to_csv(schema_path, index=False)
     print("  feature schema -> "+schema_path)
 
@@ -476,7 +485,8 @@ def run_config(laundering_combined, dataset, directed, config, seed=SEED,
                     model = model_key, **pooled_context
                 )
 
-    return write_metrics(records, dataset, str_directed, suffix=suffix, write_std=(N_FOLDS >= 2))
+    return write_metrics(records, dataset, str_directed, suffix=suffix,
+                         results_dir=RESULTS_DIR, write_std=(N_FOLDS >= 2))
 
 def main():
     for dataset in DATASETS:
@@ -512,7 +522,7 @@ def run_dataset(dataset):
     # of it was searched or selected on the test split (R1-4). Written up
     # front rather than at the end, so an interrupted run still documents
     # the configuration its partial results came from.
-    print("hyperparameters -> "+write_hyperparameters(dataset))
+    print("hyperparameters -> "+write_hyperparameters(dataset, results_dir=RESULTS_DIR))
 
     # The reduced graph does not depend on the direction, so it is built
     # once for both passes instead of once per data_preparation call.
@@ -574,5 +584,5 @@ def run_dataset(dataset):
 
 if __name__ == "__main__":
     echo_config(__file__, datasets=DATASETS, n_folds=N_FOLDS,
-                cut_offs=CUT_OFFS, targets=TARGET_COLUMNS)
+                cut_offs=CUT_OFFS, targets=TARGET_COLUMNS, results_dir=RESULTS_DIR)
     main()

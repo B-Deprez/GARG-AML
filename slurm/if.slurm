@@ -37,7 +37,9 @@ export PATH="${VSC_DATA}/miniconda3/bin:${PATH}"
 
 source activate gargaml
 
-echo "[$(date)] if: running scripts/gargaml_IF.py's own dataset/direction constants"
+export GARGAML_RESULTS_DIR="${GARGAML_RESULTS_DIR:-results-revision}"
+
+echo "[$(date)] if: running scripts/gargaml_IF.py's own dataset/direction constants results_dir=$GARGAML_RESULTS_DIR"
 
 python -u scripts/gargaml_IF.py
 

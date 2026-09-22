@@ -67,6 +67,19 @@ from src.utils.naming import MODEL_ORDER, pretty_config
 TIDY_PATTERN = re.compile(r"^(?P<dataset>.+)_(?P<direction>undirected|directed)"
                           r"(?P<suffix>.*)_metrics\.csv$")
 
+# scripts/partial_observability.py writes one tidy file per view that pools
+# *both* directions -- it carries its own `direction` COLUMN instead of a
+# filename token, since one file covers the full-graph and bank-view regimes
+# for both directions at once. A direction-less name has no token to anchor
+# the split the way TIDY_PATTERN's does, and the dataset itself can still
+# contain underscores ("HI-Small_bank012"), so the suffix is matched against
+# a known whitelist instead of guessed by position. Extend the whitelist if
+# another direction-less writer is added.
+NO_DIRECTION_SUFFIXES = ("partial_observability",)
+NO_DIRECTION_PATTERN = re.compile(
+    r"^(?P<dataset>.+)(?P<suffix>_(?:" + "|".join(NO_DIRECTION_SUFFIXES) + r"))"
+    r"_metrics\.csv$")
+
 # Metrics that are ranked at an alert-queue size rather than being a single
 # number. Their rows carry a K; every other metric's K is NaN.
 AT_K_METRICS = ["P@K", "R@K", "lift@K", "TP@K", "ties@K"]
@@ -86,10 +99,23 @@ HEADLINE_TARGETS = ["Is Laundering", "GATHER-SCATTER", "SCATTER-GATHER"]
 # ---------------------------------------------------------------------------
 
 def _parse_name(filename):
-    match = TIDY_PATTERN.match(os.path.basename(filename))
-    if match is None:
-        return None
-    return match.groupdict()
+    """Split a tidy metrics filename into dataset / direction / suffix.
+
+    Tries the direction-anchored ``TIDY_PATTERN`` first; a direction-less
+    file (see ``NO_DIRECTION_PATTERN`` above) is tried second, with
+    ``direction`` coming back ``None`` -- read its ``direction`` column
+    instead, per-row, rather than trusting the filename.
+    """
+    name = os.path.basename(filename)
+    match = TIDY_PATTERN.match(name)
+    if match is not None:
+        return match.groupdict()
+    match = NO_DIRECTION_PATTERN.match(name)
+    if match is not None:
+        groups = match.groupdict()
+        groups["direction"] = None
+        return groups
+    return None
 
 
 def metric_files(results_dir="results", datasets=None, exclude_suffixes=("_diagnosis",)):

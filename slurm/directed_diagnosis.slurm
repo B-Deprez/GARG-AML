@@ -43,8 +43,9 @@ source activate gargaml
 
 source slurm/common.sh
 : # no per-dataset resolution: this job runs a grid, not one dataset
+export GARGAML_RESULTS_DIR="${GARGAML_RESULTS_DIR:-results-revision}"
 
-echo "[$(date)] directed_diagnosis: datasets=${GARGAML_DATASETS:-default(22 x n=100 synthetic)} sample_nodes=${GARGAML_SAMPLE_NODES:-default(20000)}"
+echo "[$(date)] directed_diagnosis: datasets=${GARGAML_DATASETS:-default(22 x n=100 synthetic)} sample_nodes=${GARGAML_SAMPLE_NODES:-default(20000)} results_dir=$GARGAML_RESULTS_DIR"
 
 python -u scripts/directed_diagnosis.py
 

@@ -89,7 +89,8 @@ from src.utils.evaluation import (
     write_metrics,
 )
 from src.utils.naming import pretty_config
-from src.utils.runtime import env_override, select_datasets, echo_config, as_list
+from src.utils.runtime import (env_override, select_datasets, echo_config, as_list,
+                              resolve_results_dir)
 
 MODEL_KEY = "graphsage_u"  # see src/utils/naming.py
 
@@ -136,10 +137,11 @@ CHECKPOINT_DIR = "results/checkpoints"
 # downstream reads them -- only train_fold's own resume does.
 DATASET = env_override("dataset", DATASET)
 CONFIGS = env_override("configs", CONFIGS, as_list)
+RESULTS_DIR = resolve_results_dir()
 CHECKPOINT_DIR = env_override(
     "checkpoint_dir",
     os.path.join(os.environ["VSC_SCRATCH"], "gargaml", "checkpoints")
-    if os.environ.get("VSC_SCRATCH") else CHECKPOINT_DIR)
+    if os.environ.get("VSC_SCRATCH") else RESULTS_DIR+"/checkpoints")
 
 # No N_FOLDS constant on purpose: the fold count and the fold values actually
 # trained on are read from results/<dataset>_folds.csv, whatever
@@ -370,7 +372,7 @@ def main():
     print("Transductive evaluation on task 7's persisted folds; neighbour "
           "features are built on the full graph before folding (R2-M6).")
 
-    folds_path = "results/"+dataset+"_folds.csv"
+    folds_path = RESULTS_DIR+"/"+dataset+"_folds.csv"
     if not os.path.exists(folds_path):
         raise FileNotFoundError(
             folds_path+" not found -- run scripts/gargaml_tree.py with N_FOLDS >= 2 "
@@ -398,7 +400,7 @@ def main():
                 print("  bank view: "+str(int(eval_mask.sum()))+" of "+str(len(node_order))
                       +" nodes are clients and scored; the rest carry messages only")
 
-        schema_path = "results/"+dataset+"_undirected"+suffix+"_feature_schema.csv"
+        schema_path = RESULTS_DIR+"/"+dataset+"_undirected"+suffix+"_feature_schema.csv"
         feature_schema(config).to_csv(schema_path, index=False)
         print("  feature schema -> "+schema_path)
 
@@ -423,7 +425,8 @@ def main():
                                       laundering_combined, folds_df, cutoff, target,
                                       device, settings, eval_mask=eval_mask)
 
-        write_metrics(records, dataset, "undirected", suffix=suffix, write_std=True)
+        write_metrics(records, dataset, "undirected", suffix=suffix,
+                     results_dir=RESULTS_DIR, write_std=True)
         all_records += preprocess_records + records
 
     long_df = metrics_frame(all_records)
@@ -433,20 +436,21 @@ def main():
     # pivot_table drops as index keys and aggregate_folds filters out, so
     # without this file the preprocessing timings would exist in no output
     # at all.
-    tidy_path = "results/"+dataset+"_graphsage_tidy.csv"
+    tidy_path = RESULTS_DIR+"/"+dataset+"_graphsage_tidy.csv"
     long_df.to_csv(tidy_path, index=False)
     print("\ntidy metrics  -> "+tidy_path)
 
-    runs_path = "results/"+dataset+"_graphsage_runs.csv"
+    runs_path = RESULTS_DIR+"/"+dataset+"_graphsage_runs.csv"
     wide_runs_frame(long_df).to_csv(runs_path, index=False)
     print("per-run table -> "+runs_path)
 
-    summary_path = "results/"+dataset+"_graphsage_summary.csv"
+    summary_path = RESULTS_DIR+"/"+dataset+"_graphsage_summary.csv"
     aggregate_folds(long_df).to_csv(summary_path, index=False)
     print("fold summary  -> "+summary_path)
 
 
 if __name__ == "__main__":
     echo_config(__file__, dataset=DATASET, configs=CONFIGS,
-                checkpoint_dir=CHECKPOINT_DIR, epochs=EPOCHS, patience=PATIENCE)
+                checkpoint_dir=CHECKPOINT_DIR, epochs=EPOCHS, patience=PATIENCE,
+                results_dir=RESULTS_DIR)
     main()

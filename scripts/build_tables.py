@@ -72,6 +72,7 @@ from src.utils.reporting import (HEADLINE_CUTOFFS, HEADLINE_TARGETS,
                                  pattern_splitting_table, severance_table,
                                  sweep_table, ties_table, variance_table,
                                  write_table)
+from src.utils.runtime import resolve_results_dir
 
 # The datasets to build tables for. A missing one is skipped with a message,
 # so leaving LI-Large here before its run finishes costs nothing.
@@ -98,6 +99,8 @@ N_FOLDS = 5
 
 DIRECTIONS = ["undirected", "directed"]
 
+RESULTS_DIR = resolve_results_dir()
+
 
 def _slug(text):
     """Filename-safe, and \input-safe: LaTeX chokes on @ in a filename."""
@@ -121,7 +124,8 @@ def build_results_tables(df, dataset, written):
             label=f"tab:results-{dataset.lower()}-{metric.lower()}",
             note=("A starred cell rests on fewer folds than the others; the "
                   "count is given. Feature configurations follow "
-                  "\\texttt{src/utils/features.py}."))
+                  "\\texttt{src/utils/features.py}."),
+            results_dir=RESULTS_DIR)
         print("  results ("+metric+"): "+str(table.shape))
 
 
@@ -144,7 +148,8 @@ def build_ablation_tables(df, dataset, written):
                 note=("The degree-only configuration is computed on the "
                       "Louvain-reduced graph, so it is not confounded with the "
                       "edge-removal step. It is direction-free and therefore "
-                      "identical in both tables."))
+                      "identical in both tables."),
+                results_dir=RESULTS_DIR)
             print("  ablation ("+direction+", "+metric+"): "+str(table.shape))
 
 
@@ -174,7 +179,8 @@ def build_alert_tables(df, dataset, written):
                 label=f"tab:alerts-{dataset.lower()}-{_slug(cutoff)}-{_slug(target)}-{_slug(metric)}",
                 note=("Read beside the tie diagnostic: where \\texttt{ties@K} "
                       "exceeds 1 the top-$K$ set is not determined by the "
-                      "scores alone."))
+                      "scores alone."),
+                results_dir=RESULTS_DIR)
             print("  alerts ("+target+" @"+str(cutoff)+", "+metric+"): "+str(table.shape))
 
         ties = ties_table(df, dataset, cutoff, target, n_folds=N_FOLDS)
@@ -185,7 +191,8 @@ def build_alert_tables(df, dataset, written):
                          f"{cutoff}: the size of the score group straddling the "
                          "top-$K$ cut. A value of 1 means the queue is "
                          "determined by the scores."),
-                label=f"tab:ties-{dataset.lower()}-{_slug(cutoff)}-{_slug(target)}")
+                label=f"tab:ties-{dataset.lower()}-{_slug(cutoff)}-{_slug(target)}",
+                results_dir=RESULTS_DIR)
             print("  ties ("+target+" @"+str(cutoff)+"): "+str(ties.shape))
 
 
@@ -218,7 +225,7 @@ def build_sweep_tables(df, dataset, written):
                 # Three index levels of long model labels plus a column per
                 # setting overflows \textwidth well before the column count
                 # alone would trigger the automatic promotion.
-                wide=True)
+                wide=True, results_dir=RESULTS_DIR)
             print("  sweep ("+direction+", "+metric+"): "+str(table.shape))
 
 
@@ -244,7 +251,8 @@ def build_dataset(df, dataset, written):
                      f"{N_FOLDS} stratified folds."),
             label=f"tab:variance-{dataset.lower()}-{metric.lower()}",
             note=("The evaluation is transductive: neighbourhood summary "
-                  "features are computed on the full graph before folding."))
+                  "features are computed on the full graph before folding."),
+            results_dir=RESULTS_DIR)
         print("  variance ("+metric+"): "+str(table.shape))
 
     costs = cost_table(df, dataset, n_folds=N_FOLDS)
@@ -254,15 +262,16 @@ def build_dataset(df, dataset, written):
             caption=(f"Training and inference cost on {dataset}. GARG-AML has "
                      "no fit stage, which is why fit time is reported apart "
                      "from preprocessing and inference."),
-            label=f"tab:cost-{dataset.lower()}")
+            label=f"tab:cost-{dataset.lower()}",
+            results_dir=RESULTS_DIR)
         print("  cost: "+str(costs.shape))
 
 
 def main():
-    df = load_metrics()
+    df = load_metrics(results_dir=RESULTS_DIR)
     if df.empty:
-        print("No tidy metrics files in results/. Run a model script first "
-              "(e.g. scripts/gargaml_tree.py).")
+        print("No tidy metrics files in "+RESULTS_DIR+"/. Run a model script "
+              "first (e.g. scripts/gargaml_tree.py).")
         return
 
     print("=== Coverage: what is on disk ===")
@@ -277,17 +286,17 @@ def main():
               "single-split run; re-run gargaml_tree.py with N_FOLDS >= 2 "
               "before quoting them.")
 
-    report.to_csv("results/table_coverage.csv", index=False)
+    report.to_csv(RESULTS_DIR+"/table_coverage.csv", index=False)
 
     written = []
 
     # Edge severance is per (dataset, setting) and comes from the measure
     # scripts' own log, not from the metrics, so it is built once rather
     # than inside the per-dataset loop.
-    severance = severance_table()
+    severance = severance_table(results_dir=RESULTS_DIR)
     if severance.empty:
-        print("\nNo results/louvain_severance.csv yet -- run a measure script "
-              "to record how much the Louvain step discards (task 4).")
+        print("\nNo "+RESULTS_DIR+"/louvain_severance.csv yet -- run a measure "
+              "script to record how much the Louvain step discards (task 4).")
     else:
         written += write_table(
             severance, "severance",
@@ -297,14 +306,15 @@ def main():
             label="tab:severance",
             note=("Every inter-community edge is dropped before scoring, so "
                   "this is the fraction of the graph the second-order "
-                  "neighbourhoods never see."))
+                  "neighbourhoods never see."),
+            results_dir=RESULTS_DIR)
         print("\nseverance: "+str(severance.shape))
 
     # What that discarding destroys. Also outside the per-dataset loop: the
     # summary already spans datasets, and the table's axes are pattern type
     # and resolution rather than anything from the metrics frame.
     for column, (phrase, _) in SPLITTING_COLUMNS.items():
-        table = pattern_splitting_table(column=column)
+        table = pattern_splitting_table(results_dir=RESULTS_DIR, column=column)
         if table.empty:
             continue
         written += write_table(
@@ -317,16 +327,17 @@ def main():
             note=("\\texttt{--} marks a pattern type with no two-hop "
                   "structure to lose (FAN-OUT, FAN-IN), not a zero. "
                   "\\emph{no Louvain} is the control: nothing is "
-                  "partitioned, so every attempt survives by construction."))
+                  "partitioned, so every attempt survives by construction."),
+            results_dir=RESULTS_DIR)
         print("splitting ("+column+"): "+str(table.shape))
     if not written:
-        print("\nNo results/pattern_splitting_summary.csv yet -- run "
+        print("\nNo "+RESULTS_DIR+"/pattern_splitting_summary.csv yet -- run "
               "scripts/pattern_splitting.py (task 4).")
 
     for dataset in DATASETS:
         build_dataset(df, dataset, written)
 
-    print("\nwrote "+str(len(written))+" files to results/ "
+    print("\nwrote "+str(len(written))+" files to "+RESULTS_DIR+"/ "
           "("+str(len(written) // 2)+" tables, .tex + .csv each)")
 
 

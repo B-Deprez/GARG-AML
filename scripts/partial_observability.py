@@ -85,7 +85,8 @@ from src.methods.GARGAML import (GARG_AML_node_directed_measures,
 from src.methods.gargaml_scores import define_gargaml_scores
 from src.utils.evaluation import evaluate_scores, metric_records, metrics_frame
 from src.utils.naming import gargaml_key
-from src.utils.runtime import env_override, select_datasets, echo_config, as_list
+from src.utils.runtime import (env_override, select_datasets, echo_config, as_list,
+                              resolve_results_dir)
 
 DATASET = "HI-Small"
 
@@ -126,6 +127,7 @@ n_cpu = min(4, cpu_count() // 2)
 DATASET = env_override("dataset", DATASET)
 INSTITUTIONS = env_override("institutions", INSTITUTIONS, as_list)
 n_cpu = env_override("n_cpu", n_cpu, int)
+RESULTS_DIR = resolve_results_dir()
 
 UNDIRECTED_COLUMNS = ["node",
                       "measure_1", "measure_2", "measure_3",
@@ -311,7 +313,7 @@ def run_institution(banks_spec):
         frames.append(accounts.join(labels))
 
     accounts = pd.concat(frames)
-    accounts_path = "results/"+view+"_partial_observability_accounts.csv"
+    accounts_path = RESULTS_DIR+"/"+view+"_partial_observability_accounts.csv"
     accounts.to_csv(accounts_path)
     print("\n  accounts -> "+accounts_path)
 
@@ -325,7 +327,7 @@ def run_institution(banks_spec):
         )
 
     metrics = metrics_frame(records)
-    metrics_path = "results/"+view+"_partial_observability_metrics.csv"
+    metrics_path = RESULTS_DIR+"/"+view+"_partial_observability_metrics.csv"
     metrics.to_csv(metrics_path, index=False)
     print("  metrics  -> "+metrics_path)
     print("  completed in "+format(timeit.default_timer()-start_time, ".1f")+" seconds")
@@ -334,12 +336,13 @@ def run_institution(banks_spec):
 
 
 def main():
-    os.makedirs('results', exist_ok=True)
+    os.makedirs(RESULTS_DIR, exist_ok=True)
     for banks_spec in INSTITUTIONS:
         run_institution(banks_spec)
     print("\nAll institutions processed successfully.")
 
 
 if __name__ == "__main__":
-    echo_config(__file__, dataset=DATASET, institutions=INSTITUTIONS, n_cpu=n_cpu)
+    echo_config(__file__, dataset=DATASET, institutions=INSTITUTIONS, n_cpu=n_cpu,
+                results_dir=RESULTS_DIR)
     main()

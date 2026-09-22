@@ -75,11 +75,12 @@ source activate gargaml
 
 source slurm/common.sh
 resolve_dataset "${1:-}"
+export GARGAML_RESULTS_DIR="${GARGAML_RESULTS_DIR:-results-revision}"
 
 # Fail immediately rather than training on CPU with a GPU allocated.
 export GARGAML_REQUIRE_GPU=1
 
-echo "[$(date)] graphsage: dataset=$GARGAML_DATASET configs=${GARGAML_CONFIGS:-default(topology,attributes)} require_gpu=$GARGAML_REQUIRE_GPU checkpoints=${GARGAML_CHECKPOINT_DIR:-\$VSC_SCRATCH/gargaml/checkpoints}"
+echo "[$(date)] graphsage: dataset=$GARGAML_DATASET configs=${GARGAML_CONFIGS:-default(topology,attributes)} require_gpu=$GARGAML_REQUIRE_GPU checkpoints=${GARGAML_CHECKPOINT_DIR:-\$VSC_SCRATCH/gargaml/checkpoints} results_dir=$GARGAML_RESULTS_DIR"
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
 
 python -u scripts/graphsage_baseline.py

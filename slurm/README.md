@@ -179,19 +179,23 @@ from a per-user GPU cap (`AssocGrpGpuLimit`), which no amount of waiting clears.
 
 ## Known gaps — read before trusting a rerun
 
-**Synthetic stage 1 → stage 2 is not wired.** `gargaml_undirected_synth.py:131`
-writes `results/<ds>_GARGAML_undirected_parallel.csv`, while
-`gargaml_tree_synthetic{,_3,_5}.py:51` all read
-`results-0/<ds>_GARGAML_<direction>.csv` — a different directory for both
-directions and a different filename for undirected. So `tree_synth.slurm` today
-reads the **archived** measures, not what the synthetic stage-1 array writes.
-It is left submittable because it reproduces the published numbers from the
-existing archive; it is not connected to a fresh run. Decide which name wins
-before regenerating.
+**Synthetic stage 1 → stage 2 is now wired.** `gargaml_undirected_synth.py`
+writes `<dir>/<ds>_GARGAML_undirected_parallel.csv` and
+`gargaml_tree_synthetic{,_3,_5}.py` now read that same filename (the
+`_parallel` suffix bug is fixed alongside the directory), from the same
+`<dir>` — both are `GARGAML_RESULTS_DIR`, which `tree_synth.slurm` and the
+synthetic measure jobs default to `results-revision/` under Slurm. A bare
+`python scripts/...` run still defaults to `results/`. Populating
+`results-revision/` with fresh synthetic stage-1 measures is still a separate,
+not-yet-run step — nobody has submitted that array against the new directory
+yet. To reproduce the old pre-`c5fba86` archived numbers, submit
+`tree_synth.slurm` with `GARGAML_RESULTS_DIR=results-0` explicitly.
 
-**`distribution_scores.py` reads `results-3/` hardcoded** (`:472`, `:476`) —
-the pre-`c5fba86` directed measures. Its directed base-score numbers therefore
-come from the archive regardless of what stage 1 writes.
+**`distribution_scores.py` no longer hardcodes `results-3/`.** It now reads
+and writes through the same `GARGAML_RESULTS_DIR` every other script uses
+(`results-revision/` under Slurm by default). To reproduce the old
+pre-`c5fba86` archived directed base-score numbers, submit
+`distribution_scores.slurm` with `GARGAML_RESULTS_DIR=results-3` explicitly.
 
 **`LI-Large_nolouvain` (index 9) is expected to be infeasible, not slow.** The
 reduction is what keeps a second-order ego graph small; without it HI-Small's
@@ -200,17 +204,24 @@ outcome — "what the pre-processing buys" is exactly what R2-M3 asks — rather
 than resubmitting it indefinitely. `HI-Small_nolouvain` (index 8) is the arm
 worth actually attempting, and it is far more expensive than the `_res<r>` arms.
 
-**Two metrics files never reach a table.** `build_tables.py` picks up 8 of the
-33 `*_metrics.csv` on disk. Excluding `*_diagnosis_metrics.csv` is deliberate;
-excluding the two `*_partial_observability_metrics.csv` is an accident of the
-filename regex (they carry no `_directed`/`_undirected` token), so task 5's
-appendix numbers are computed and then dropped. That is a code fix, not a
-scheduling one.
+**Two metrics files now reach a table.** `build_tables.py` used to pick up 8 of
+the 33 `*_metrics.csv` on disk: excluding `*_diagnosis_metrics.csv` was
+deliberate, but excluding the two `*_partial_observability_metrics.csv` was an
+accident of the filename regex (they carry no `_directed`/`_undirected`
+token). `src/utils/reporting.py`'s `TIDY_PATTERN` now has a direction-less
+fallback (`NO_DIRECTION_PATTERN`), so those two files parse correctly and
+task 5's appendix numbers reach a table like everything else.
 
-**Pooled outputs collide under sharding.** `directed_diagnosis.py` and
-`pattern_splitting.py` each concatenate over their whole dataset list into one
-fixed filename, so one-dataset-per-task would have every task overwrite the pool
-with its own single-dataset version. Both are kept as single serial jobs here.
+**Pooled outputs are now guarded under sharding, not immune to it.**
+`directed_diagnosis.py` and `pattern_splitting.py` each concatenate over their
+whole dataset list into one fixed filename, so one-dataset-per-task would have
+every task overwrite the pool with its own single-dataset version. Sharding
+these is still possible — nothing stops `GARGAML_DATASET`/`GARGAML_DATASET_INDEX`/
+`SLURM_ARRAY_TASK_ID` from being set — but both scripts now detect that case
+and skip the pooled write with a one-line explanation instead of silently
+corrupting it; the per-dataset files are written normally either way. Both are
+still kept as single serial jobs here, which is the simpler way to get a
+correct pooled file in one submission.
 
 **`scripts/test_parallel.py` is not a sanity check** and is deliberately absent
 from this harness. It runs the full 66-dataset directed sweep including the

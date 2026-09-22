@@ -52,8 +52,9 @@ source activate gargaml
 
 source slurm/common.sh
 export GARGAML_INSTITUTIONS="${1:-012}"
+export GARGAML_RESULTS_DIR="${GARGAML_RESULTS_DIR:-results-revision}"
 
-echo "[$(date)] partial_obs: institutions=$GARGAML_INSTITUTIONS dataset=${GARGAML_DATASET:-default(HI-Small)} louvain=off"
+echo "[$(date)] partial_obs: institutions=$GARGAML_INSTITUTIONS dataset=${GARGAML_DATASET:-default(HI-Small)} louvain=off results_dir=$GARGAML_RESULTS_DIR"
 
 python -u scripts/partial_observability.py
 

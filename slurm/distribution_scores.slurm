@@ -20,13 +20,17 @@
 #          `import timeit` is dead and it writes no time_results file), so this
 #          is headroom, not a measured bound. The LI-Large arm is unmeasured.
 #
-# NOTE -- INPUT PATH, read before trusting the output.
-#          This script reads results-3/<dataset>_GARGAML_<direction>.csv
-#          hardcoded, NOT results/. Per CLAUDE.md, results-3 holds the pre-fix
-#          (pre-c5fba86) directed measures and is byte-identical to results-0.
-#          So its directed base-score numbers come from the archive, not from
-#          what the stage-1 jobs write. Repoint or parameterise that path before
-#          using this to report post-fix numbers.
+# NOTE -- INPUT PATH, now fixed.
+#          This script used to read results-3/<dataset>_GARGAML_<direction>.csv
+#          hardcoded, a pre-fix (pre-c5fba86) archive workaround. It now reads
+#          from the same GARGAML_RESULTS_DIR every other script uses -- under
+#          Slurm that is results-revision/ by default (see the export below);
+#          a bare `python scripts/...` run still defaults to results/. To
+#          reproduce the old archived pre-c5fba86 numbers instead, submit with
+#          GARGAML_RESULTS_DIR=results-3 explicitly.
+#          Populating results-revision/ with fresh measures is still a
+#          separate, not-yet-run step -- this job does not do that itself, it
+#          only reads whatever is already there.
 #          Its dataset list is also inside `if __name__`, so GARGAML_DATASET
 #          does not select anything here -- it runs HI-Small and LI-Large both.
 
@@ -52,8 +56,9 @@ export PATH="${VSC_DATA}/miniconda3/bin:${PATH}"
 source activate gargaml
 
 source slurm/common.sh
+export GARGAML_RESULTS_DIR="${GARGAML_RESULTS_DIR:-results-revision}"
 
-echo "[$(date)] distribution_scores: datasets=HI-Small,LI-Large (script constants) reading=results-3/ (see header note)"
+echo "[$(date)] distribution_scores: datasets=HI-Small,LI-Large (script constants) reading=$GARGAML_RESULTS_DIR/ results_dir=$GARGAML_RESULTS_DIR"
 
 python -u scripts/distribution_scores.py
 

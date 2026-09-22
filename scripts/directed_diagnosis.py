@@ -72,7 +72,8 @@ from src.methods.directed_diagnosis import (SCORE_VARIANTS, check_against_pipeli
 from src.utils.evaluation import (SEED, evaluate_scores, metric_records,
                                   nan_metrics, write_metrics)
 from src.utils.graph_processing import graph_community
-from src.utils.runtime import env_override, select_datasets, echo_config, as_list
+from src.utils.runtime import (env_override, select_datasets, echo_config, as_list,
+                              resolve_results_dir)
 
 # See the module docstring: off by default, deliberately.
 LOUVAIN = False
@@ -134,6 +135,7 @@ DATASETS = synthetic_datasets()
 DATASETS = select_datasets(DATASETS)
 SAMPLE_NODES = env_override("sample_nodes", SAMPLE_NODES,
                             lambda r: None if r.lower() in ("none", "all") else int(r))
+RESULTS_DIR = resolve_results_dir()
 # Widen when the budget allows. HI-Small is only meaningful sampled -- see
 # SAMPLE_NODES and the caveat in the module docstring.
 # DATASETS = synthetic_datasets((100, 10000))
@@ -238,7 +240,7 @@ def diagnose_dataset(dataset):
         roles = structural_roles(G, labels.index[labels["laundering"] == 1])
         df["role"] = pd.Series(roles).reindex(df.index).fillna("none")
 
-    path = "results/"+dataset+"_directed_diagnosis.csv"
+    path = RESULTS_DIR+"/"+dataset+"_directed_diagnosis.csv"
     df.to_csv(path)
     print("  per-node diagnosis -> "+path)
 
@@ -271,7 +273,7 @@ def write_summary(df, dataset, has_labels):
     summary.insert(0, "group", summary.pop("group"))
     summary.insert(0, "dataset", dataset)
 
-    path = "results/"+dataset+"_directed_diagnosis_summary.csv"
+    path = RESULTS_DIR+"/"+dataset+"_directed_diagnosis_summary.csv"
     summary.to_csv(path, index=False)
     print("  summary -> "+path)
     return summary
@@ -303,7 +305,7 @@ def write_variant_metrics(df, dataset, labels):
                                       n_pos=int(y_true.sum()), **context)
 
     return write_metrics(records, dataset, "directed", suffix="_diagnosis",
-                         write_matrices=False)
+                         results_dir=RESULTS_DIR, write_matrices=False)
 
 
 def main():
@@ -314,22 +316,36 @@ def main():
             print("\n### "+dataset+" -- SKIPPED: no edge data on disk ###")
             continue
         diagnose_dataset(dataset)
-        summaries.append("results/"+dataset+"_directed_diagnosis_summary.csv")
-        path = "results/"+dataset+"_directed_diagnosis_metrics.csv"
+        summaries.append(RESULTS_DIR+"/"+dataset+"_directed_diagnosis_summary.csv")
+        path = RESULTS_DIR+"/"+dataset+"_directed_diagnosis_metrics.csv"
         if os.path.exists(path):
             metrics.append(path)
+
+    # A sharded/array submission (one dataset per task, via GARGAML_DATASET /
+    # GARGAML_DATASET_INDEX / SLURM_ARRAY_TASK_ID) only ever sees its own
+    # dataset in DATASETS, so the pooled write below would silently clobber
+    # the fixed-name pooled files with just that one dataset's rows,
+    # discarding every other task's. Skip the pooled write in that case; the
+    # per-dataset files above are written normally either way.
+    sharded = any(os.environ.get(k) for k in
+                  ("GARGAML_DATASET", "GARGAML_DATASET_INDEX", "SLURM_ARRAY_TASK_ID"))
+    if sharded:
+        print("skipping pooled directed_diagnosis_summary/metrics.csv: this looks "
+              "like a sharded run (GARGAML_DATASET/_INDEX or SLURM_ARRAY_TASK_ID is "
+              "set) -- rerun over the full DATASETS list to regenerate the pooled files")
+        return
 
     # Pool the grid, which is where the argument actually lives: one
     # 100-node dataset is too small to carry it.
     if summaries:
         pooled = pd.concat([pd.read_csv(p) for p in summaries], ignore_index=True)
-        pooled.to_csv("results/directed_diagnosis_summary.csv", index=False)
+        pooled.to_csv(RESULTS_DIR+"/directed_diagnosis_summary.csv", index=False)
         print("\npooled summary over "+str(len(summaries))+" datasets -> "
-              "results/directed_diagnosis_summary.csv")
+              +RESULTS_DIR+"/directed_diagnosis_summary.csv")
     if metrics:
         pooled = pd.concat([pd.read_csv(p) for p in metrics], ignore_index=True)
-        pooled.to_csv("results/directed_diagnosis_metrics.csv", index=False)
-        print("pooled variant metrics -> results/directed_diagnosis_metrics.csv")
+        pooled.to_csv(RESULTS_DIR+"/directed_diagnosis_metrics.csv", index=False)
+        print("pooled variant metrics -> "+RESULTS_DIR+"/directed_diagnosis_metrics.csv")
 
 
 if __name__ == "__main__":

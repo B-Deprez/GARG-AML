@@ -66,8 +66,9 @@ source activate gargaml
 
 source slurm/common.sh
 resolve_dataset "${1:-}"
+export GARGAML_RESULTS_DIR="${GARGAML_RESULTS_DIR:-results-revision}"
 
-echo "[$(date)] tree: dataset=$GARGAML_DATASET n_folds=${GARGAML_N_FOLDS:-default(5)}"
+echo "[$(date)] tree: dataset=$GARGAML_DATASET n_folds=${GARGAML_N_FOLDS:-default(5)} results_dir=$GARGAML_RESULTS_DIR"
 
 python -u scripts/gargaml_tree.py
 

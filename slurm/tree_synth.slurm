@@ -18,19 +18,20 @@
 #          100,000-node measure frame (~18 columns), not a transaction file.
 # TIME     02:00:00 -- 66 datasets x a handful of cheap fits each.
 #
-# WARNING -- INPUT PATH MISMATCH, read before submitting.
-#          These three scripts read  results-0/<dataset>_GARGAML_<direction>.csv
-#          while the stage-1 synthetic jobs write
-#                                    results/<dataset>_GARGAML_directed.csv  and
-#                                    results/<dataset>_GARGAML_undirected_parallel.csv
-#          So a fresh stage-1 run does NOT feed this job: the directory differs
-#          for both directions, and the filename differs for undirected.
-#          Today this job therefore reads the ARCHIVED results-0 measures, which
-#          per CLAUDE.md are pre-c5fba86 for the directed arm. Resolve the
-#          naming before trusting a rerun -- see slurm/README.md, "Known gap:
-#          synthetic stage 1 -> stage 2". This job is left submittable because
-#          it reproduces today's published numbers from today's archive; it is
-#          not wired to the new measures.
+# PATHS -- stage 1 and stage 2 now share GARGAML_RESULTS_DIR, which fixes the
+#          mismatch this warning used to describe: these three scripts read
+#          <dir>/<dataset>_GARGAML_directed.csv and
+#          <dir>/<dataset>_GARGAML_undirected_parallel.csv (the "_parallel"
+#          suffix the undirected synthetic stage-1 job actually writes -- both
+#          bugs are fixed together in scripts/gargaml_tree_synthetic{,_3,_5}.py),
+#          from the SAME <dir> the measure jobs wrote to. Under Slurm that is
+#          results-revision/ by default (see the export below); a bare
+#          `python scripts/...` run still defaults to results/. To reproduce
+#          the old pre-c5fba86 archived numbers instead, submit with
+#          GARGAML_RESULTS_DIR=results-0 explicitly.
+#          Populating results-revision/ with fresh synthetic stage-1 measures
+#          is still a separate, not-yet-run step -- this job does not do that
+#          itself, it only reads whatever is already there.
 
 #SBATCH --job-name=gargaml_tree_synth
 #SBATCH --output=gargaml_tree_synth.out
@@ -54,6 +55,7 @@ export PATH="${VSC_DATA}/miniconda3/bin:${PATH}"
 source activate gargaml
 
 source slurm/common.sh
+export GARGAML_RESULTS_DIR="${GARGAML_RESULTS_DIR:-results-revision}"
 
 case "${1:-base}" in
   base) SYNTH_SCRIPT="scripts/gargaml_tree_synthetic.py" ;;
@@ -62,7 +64,7 @@ case "${1:-base}" in
   *)    echo "ERROR: variant must be base, 3 or 5 (got '${1}')" >&2; exit 1 ;;
 esac
 
-echo "[$(date)] tree_synth: variant=${1:-base} script=$SYNTH_SCRIPT reading=results-0/ (see header warning)"
+echo "[$(date)] tree_synth: variant=${1:-base} script=$SYNTH_SCRIPT reading=$GARGAML_RESULTS_DIR/ results_dir=$GARGAML_RESULTS_DIR"
 
 python -u "$SYNTH_SCRIPT"
 

@@ -56,8 +56,9 @@ source activate gargaml
 
 source slurm/common.sh
 resolve_synth_index
+export GARGAML_RESULTS_DIR="${GARGAML_RESULTS_DIR:-results-revision}"
 
-echo "[$(date)] measures_synth_dir: index=$SLURM_ARRAY_TASK_ID tier=$GARGAML_SYNTH_TIER n_cpu=${GARGAML_N_CPU:-default(4)} force=${GARGAML_FORCE:-0}"
+echo "[$(date)] measures_synth_dir: index=$SLURM_ARRAY_TASK_ID tier=$GARGAML_SYNTH_TIER n_cpu=${GARGAML_N_CPU:-default(4)} force=${GARGAML_FORCE:-0} results_dir=$GARGAML_RESULTS_DIR"
 
 python -u scripts/gargaml_directed_synth.py
 

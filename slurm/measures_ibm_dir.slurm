@@ -64,8 +64,9 @@ source activate gargaml
 
 source slurm/common.sh
 resolve_dataset "${1:-}"
+export GARGAML_RESULTS_DIR="${GARGAML_RESULTS_DIR:-results-revision}"
 
-echo "[$(date)] measures_ibm_dir: dataset=$GARGAML_DATASET n_cpu=${GARGAML_N_CPU:-default(4)} force=${GARGAML_FORCE:-0} scratch=$GARGAML_SCRATCH"
+echo "[$(date)] measures_ibm_dir: dataset=$GARGAML_DATASET n_cpu=${GARGAML_N_CPU:-default(4)} force=${GARGAML_FORCE:-0} scratch=$GARGAML_SCRATCH results_dir=$GARGAML_RESULTS_DIR"
 
 python -u scripts/gargaml_directed.py
 

@@ -15,9 +15,12 @@ from src.methods.gargaml_scores import define_gargaml_scores, summarise_gargaml_
 from src.data.graph_construction import construct_synthetic_graph
 from src.utils.graph_processing import graph_community
 from src.utils.evaluation import SEED, evaluate_model, holdout_split, metric_names
+from src.utils.runtime import resolve_results_dir
 
 from sklearn import tree
 from sklearn import ensemble
+
+RESULTS_DIR = resolve_results_dir()
 
 # This script's own established convention (see data_preparation's fillna(-1) below)
 # uses -1 for "missing", and a total training failure is reported as 0 (see
@@ -47,8 +50,12 @@ def _legacy_zero_metrics():
 
 def data_preparation(dataset, gargaml_columns, directed, score_type):
     directed_str = 'directed' if directed else 'undirected'
-    # Load the dataset
-    path_res = 'results-0/'+dataset+'_GARGAML_'+directed_str+'.csv'
+    # Load the dataset. The undirected measures are written with a
+    # "_parallel" suffix by gargaml_undirected_synth.py; directed is not.
+    if directed:
+        path_res = RESULTS_DIR+'/'+dataset+'_GARGAML_'+directed_str+'.csv'
+    else:
+        path_res = RESULTS_DIR+'/'+dataset+'_GARGAML_'+directed_str+'_parallel.csv'
     results_df_measures = pd.read_csv(path_res)
     # Define GARG-AML scores
     results_df = define_gargaml_scores(results_df_measures, directed=directed, score_type=score_type)

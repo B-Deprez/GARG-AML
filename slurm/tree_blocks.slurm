@@ -38,7 +38,9 @@ export PATH="${VSC_DATA}/miniconda3/bin:${PATH}"
 
 source activate gargaml
 
-echo "[$(date)] tree_blocks: running scripts/gargaml_tree_blocks.py's own dataset constant, config=blocks"
+export GARGAML_RESULTS_DIR="${GARGAML_RESULTS_DIR:-results-revision}"
+
+echo "[$(date)] tree_blocks: running scripts/gargaml_tree_blocks.py's own dataset constant, config=blocks results_dir=$GARGAML_RESULTS_DIR"
 
 python -u scripts/gargaml_tree_blocks.py
 

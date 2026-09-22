@@ -175,6 +175,7 @@ revision. Do not add new hard-coded uses of them:
 | Label cut-off list | Task 2 **done** — the threshold-free ranking metrics (P@K, R@K, lift@K, TP@K, AP) are reported alongside the swept cut-offs; report through `evaluation.py`, do not add a parallel metric path |
 | Full-graph view (no bank filter) | Task 5 adds single-bank views — `construct_IBM_graph(..., banks=None)` and `define_ML_labels(..., banks=None)` keep today's behaviour by default; a view is named `<dataset>_bank<b>` (or `<dataset>_banktop<k>` for a pooled institution) and flows through as the `dataset` string. Do not special-case views downstream |
 | Model names (`gargaml tree undirected` vs `GARG-AML Undir. Tree`) | Task 12 standardises — `src/utils/naming.py` is the one canonical scheme; route new labels through `pretty()`, or `pretty_config()` when a task-3 feature config is involved |
+| Results output directory | Was hardcoded `results/` (plus two scripts hardcoding archive paths `results-0/`/`results-3/`) everywhere. Now `GARGAML_RESULTS_DIR`, resolved via `src/utils/runtime.py::resolve_results_dir()` exactly like `GARGAML_N_FOLDS`/`GARGAML_DATASET` — every `.slurm` job defaults it to `results-revision/`; bare local runs still default to `results/` |
 
 ### Stale results on disk — every directed synthetic measure file
 

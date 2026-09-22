@@ -12,11 +12,17 @@ from src.utils.evaluation import (LEGACY_METRICS, SEED, evaluate_scores,
                                   metric_records, nan_metrics, read_folds,
                                   write_metrics)
 from src.utils.naming import gargaml_key
+from src.utils.runtime import resolve_results_dir
 import pandas as pd
 import timeit
 
 import matplotlib.pyplot as plt
 import numpy as np
+
+# RESULTS_DIR used to be hardcoded to results-0 (writes) / results-3 (reads) as an
+# archive workaround; it is now the same GARGAML_RESULTS_DIR every other script uses.
+# Set GARGAML_RESULTS_DIR=results-3 explicitly to reproduce the old pre-c5fba86 archive reads.
+RESULTS_DIR = resolve_results_dir()
 
 # Task 7: the base GARG-AML score gets a per-fold breakdown too, and this one
 # is free. The score is deterministic and nothing is fitted, so it carries no
@@ -140,7 +146,7 @@ def distribution_scores_IBM_plots(dataset, results_df, str_directed, str_supervi
             divergence_matrix[i, j] = divergence
 
     divergence_df = pd.DataFrame(divergence_matrix, columns=columns, index=cut_offs)
-    divergence_df.to_csv("results-0/"+dataset+"_GARGAML_"+str_supervised+"_"+str_directed+"_combined_divergence.csv")
+    divergence_df.to_csv(RESULTS_DIR+"/"+dataset+"_GARGAML_"+str_supervised+"_"+str_directed+"_combined_divergence.csv")
 
     print("="*10)
     print("Divergence saved")
@@ -156,7 +162,7 @@ def distribution_scores_IBM_plots(dataset, results_df, str_directed, str_supervi
     else:
         fig.suptitle('Distribution of '+ str_directed +' anomaly scores by Label for data set: '+ dataset)
     fig.tight_layout()
-    plt.savefig("results-0/"+dataset+"_GARGAML_"+str_supervised+"_"+str_directed+"_combined_histogram.pdf")
+    plt.savefig(RESULTS_DIR+"/"+dataset+"_GARGAML_"+str_supervised+"_"+str_directed+"_combined_histogram.pdf")
     plt.close()
 
     print("="*10)
@@ -195,7 +201,7 @@ def distribution_scores_IBM_plots(dataset, results_df, str_directed, str_supervi
         fig.suptitle('Lift curve of '+ str_directed +' anomaly scores by Label for data set: '+ dataset)
 
     fig.tight_layout()
-    plt.savefig("results-0/"+dataset+"_GARGAML_"+str_supervised+"_"+str_directed+"_combined_lift.pdf")
+    plt.savefig(RESULTS_DIR+"/"+dataset+"_GARGAML_"+str_supervised+"_"+str_directed+"_combined_lift.pdf")
     plt.close()
 
     print("="*10)
@@ -273,9 +279,9 @@ def distribution_scores_IBM(dataset, results_df, str_directed, str_supervised):
 
     # Task 7's partition, if one was written. None is a normal state, not an
     # error -- see USE_FOLDS.
-    folds_df = read_folds(dataset) if USE_FOLDS else None
+    folds_df = read_folds(dataset, results_dir=RESULTS_DIR) if USE_FOLDS else None
     if folds_df is None:
-        print("No fold partition at "+folds_path(dataset)+
+        print("No fold partition at "+folds_path(dataset, results_dir=RESULTS_DIR)+
               ": reporting full-population metrics only (task 7's per-fold "
               "breakdown needs gargaml_tree.py run with N_FOLDS >= 2 first).")
     else:
@@ -339,7 +345,7 @@ def distribution_scores_IBM(dataset, results_df, str_directed, str_supervised):
             # label text: that same cell parses the whole line with
             # line.split('_'), not just the dataset/pattern prefix, so a third
             # underscore anywhere else shifts every index after it.
-            with open('results/results_performance_IBM_'+str_directed+'.txt', 'a') as f:
+            with open(RESULTS_DIR+'/results_performance_IBM_'+str_directed+'.txt', 'a') as f:
                 f.write(dataset+'_'+column+'_'+str(cut_off)+' [precision, F1, AUC-ROC, AUC-PR, then '
                         +'ranking metrics in a fixed order, see evaluation.py]: '
                         +str(result_list)+'\n')
@@ -352,7 +358,7 @@ def distribution_scores_IBM(dataset, results_df, str_directed, str_supervised):
     # ("Pick a suffix if it ever needs a tidy file") because at the time
     # this script did not write a tidy file at all.
     write_metrics(records, dataset, str_directed, suffix="_base",
-                  write_matrices=False)
+                  results_dir=RESULTS_DIR, write_matrices=False)
 
 def plot_distribution_synthetic(laundering_combined, columns, str_directed, str_supervised):
     n = len(columns)
@@ -385,7 +391,7 @@ def plot_distribution_synthetic(laundering_combined, columns, str_directed, str_
         axes[i//2, i%2].set_ylabel('Relative Frequency')
         axes[i//2, i%2].set_title(column)
     fig.tight_layout()
-    plt.savefig("results-0/synthetic_GARGAML_"+str_supervised+"_"+str_directed+"_histogram.pdf")
+    plt.savefig(RESULTS_DIR+"/synthetic_GARGAML_"+str_supervised+"_"+str_directed+"_histogram.pdf")
     plt.close()
 
 def plot_lift_synthetic(laundering_combined, columns, str_directed, str_supervised):
@@ -406,7 +412,7 @@ def plot_lift_synthetic(laundering_combined, columns, str_directed, str_supervis
         axes[i//2, i%2].set_title(column)
 
     fig.tight_layout()
-    plt.savefig("results-0/synthetic_GARGAML_"+str_supervised+"_"+str_directed+"_lift.pdf")
+    plt.savefig(RESULTS_DIR+"/synthetic_GARGAML_"+str_supervised+"_"+str_directed+"_lift.pdf")
     plt.close()
 
 
@@ -469,11 +475,11 @@ def general_calculation(dataset, directed, supervised, score_type):
     str_supervised = "supervised" if supervised else "unsupervised"
 
     if supervised:
-        results_df_measures = pd.read_csv("results-3/"+dataset+"_GARGAML_"+str_directed+".csv")
+        results_df_measures = pd.read_csv(RESULTS_DIR+"/"+dataset+"_GARGAML_"+str_directed+".csv")
         results_df = define_gargaml_scores(results_df_measures, directed=directed, score_type=score_type)
 
     else:
-        results_df = pd.read_csv("results-3/"+dataset+"_GARGAML_"+str_directed+"_IF.csv")
+        results_df = pd.read_csv(RESULTS_DIR+"/"+dataset+"_GARGAML_"+str_directed+"_IF.csv")
         results_df = results_df.set_index("node")
         results_df = results_df[["anomaly_score"]]
         results_df["anomaly_score"] = results_df["anomaly_score"]*(-1)
@@ -516,7 +522,7 @@ def benchmark_synthetic(
                             string_name = 'synthetic_' + generation_method + '_'  + str(n_nodes) + '_' + str(m_edges) + '_' + str(p_edges) + '_' + str(n_patterns)
                             print("====", string_name, "====")
                             results_int = general_calculation(string_name, directed, supervised, score_type)
-                            with open('results-0/results_performance_'+str_directed+'_'+str_supervised+'.txt', 'a') as f:
+                            with open(RESULTS_DIR+'/results_performance_'+str_directed+'_'+str_supervised+'.txt', 'a') as f:
                                 f.write(string_name+' [Precision, F1, AUC-ROC, AUC-PR]: '+str(results_int)+'\n')
                     if generation_method == 'Erdos-Renyi':
                         m_edges = 0
@@ -524,7 +530,7 @@ def benchmark_synthetic(
                             string_name = 'synthetic_' + generation_method + '_'  + str(n_nodes) + '_' + str(m_edges) + '_' + str(p_edges) + '_' + str(n_patterns)
                             print("====", string_name, "====")
                             results_int = general_calculation(string_name, directed, supervised, score_type)
-                            with open('results-0/results_performance_'+str_directed+'_'+str_supervised+'.txt', 'a') as f:
+                            with open(RESULTS_DIR+'/results_performance_'+str_directed+'_'+str_supervised+'.txt', 'a') as f:
                                 f.write(string_name+' [Precision, F1, AUC-ROC, AUC-PR]: '+str(results_int)+'\n')
 
                     if generation_method == 'Watts-Strogatz':
@@ -533,7 +539,7 @@ def benchmark_synthetic(
                                 string_name = 'synthetic_' + generation_method + '_'  + str(n_nodes) + '_' + str(m_edges) + '_' + str(p_edges) + '_' + str(n_patterns)
                                 print("====", string_name, "====")
                                 results_int = general_calculation(string_name, directed, supervised, score_type)
-                                with open('results-0/results_performance_'+str_directed+'_'+str_supervised+'.txt', 'a') as f:
+                                with open(RESULTS_DIR+'/results_performance_'+str_directed+'_'+str_supervised+'.txt', 'a') as f:
                                     f.write(string_name+' [Precision, F1, AUC-ROC, AUC-PR]: '+str(results_int)+'\n')
 
 if __name__ == "__main__":

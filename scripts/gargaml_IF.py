@@ -21,6 +21,9 @@ from src.methods.utils.neighbourhood_functions import GARG_AML_nodeselection
 
 from src.data.pattern_construction import define_ML_labels, summarise_ML_labels
 from src.utils.evaluation import SEED, evaluate_scores, metric_records, nan_metrics, write_metrics
+from src.utils.runtime import resolve_results_dir
+
+RESULTS_DIR = resolve_results_dir()
 
 # IsolationForest is unsupervised and never sees labels during fit, so fitting it on
 # every account (rather than a 70/30 split) is not label leakage -- it is standard
@@ -34,7 +37,7 @@ def gargaml_IF(dataset = "HI-Small", directed = True):
     path = "data/"+dataset+"_Trans.csv"
 
     str_directed = "directed" if directed else "undirected"
-    result_path = "results/"+dataset+"_GARGAML_"+str_directed+".csv"
+    result_path = RESULTS_DIR+"/"+dataset+"_GARGAML_"+str_directed+".csv"
 
     if os.path.exists(result_path):
         measure_df = pd.read_csv(result_path)
@@ -187,7 +190,7 @@ def IF_AUC(dataset, measure_df, directed=True):
                 model=IF_MODEL_KEY, **context
             )
 
-    write_metrics(records, dataset, str_directed, suffix="_if")
+    write_metrics(records, dataset, str_directed, suffix="_if", results_dir=RESULTS_DIR)
 
 if __name__ == "__main__":
     dataset = "HI-Small"
@@ -196,5 +199,5 @@ if __name__ == "__main__":
     str_directed = "directed" if directed else "undirected"
     measure_df = gargaml_IF(dataset = dataset, directed = directed)
     if need_to_save:
-        measure_df.to_csv("results/"+dataset+"_GARGAML_"+str_directed+"_IF.csv", index = False)
+        measure_df.to_csv(RESULTS_DIR+"/"+dataset+"_GARGAML_"+str_directed+"_IF.csv", index = False)
     IF_AUC(dataset, measure_df, directed=directed)

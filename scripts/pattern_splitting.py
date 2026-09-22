@@ -59,7 +59,8 @@ from src.data.graph_construction import construct_IBM_graph
 from src.data.pattern_construction import pattern_instances
 from src.utils.graph_processing import DEFAULT_RESOLUTION, community_map
 from src.utils.pattern_splitting import analyse, summarise
-from src.utils.runtime import env_override, select_datasets, echo_config, as_list
+from src.utils.runtime import (env_override, select_datasets, echo_config, as_list,
+                              resolve_results_dir)
 
 # Datasets to diagnose. LI-Large is listed but is the multi-hour job -- its
 # graph alone is 176M edges.
@@ -75,6 +76,7 @@ RESOLUTIONS = [None, 1, 5, DEFAULT_RESOLUTION, 20, 50]
 
 # Slurm overrides; the constants above remain the documented defaults.
 DATASETS = select_datasets(DATASETS)
+RESULTS_DIR = resolve_results_dir()
 
 
 def diagnose_dataset(dataset):
@@ -112,12 +114,12 @@ def diagnose_dataset(dataset):
               f"  DESTROYED {destroyed:5.1f}%")
 
     frame = pd.concat(frames, ignore_index=True)
-    path = "results/"+dataset+"_pattern_splitting.csv"
+    path = RESULTS_DIR+"/"+dataset+"_pattern_splitting.csv"
     frame.to_csv(path, index=False)
     print("  per-attempt -> "+path)
 
     summary = summarise(frame)
-    path = "results/"+dataset+"_pattern_splitting_summary.csv"
+    path = RESULTS_DIR+"/"+dataset+"_pattern_splitting_summary.csv"
     summary.to_csv(path, index=False)
     print("  summary     -> "+path)
     return summary
@@ -131,15 +133,31 @@ def main():
             continue
         summaries.append(diagnose_dataset(dataset))
 
-    if summaries:
-        pooled = pd.concat(summaries, ignore_index=True)
-        pooled.to_csv("results/pattern_splitting_summary.csv", index=False)
-        print("\npooled summary -> results/pattern_splitting_summary.csv")
-        print("\nGARG-AML's own targets:")
-        targets = pooled[pooled.pattern_type.isin(["GATHER-SCATTER", "SCATTER-GATHER"])]
-        print(targets[["dataset", "resolution", "pattern_type", "attempts",
-                       "pct_split", "mean_path_survival", "pct_destroyed"]]
-              .to_string(index=False))
+    if not summaries:
+        return
+
+    # A sharded/array submission (one dataset per task, via GARGAML_DATASET /
+    # GARGAML_DATASET_INDEX / SLURM_ARRAY_TASK_ID) only ever sees its own
+    # dataset in DATASETS, so the pooled write below would silently clobber
+    # the fixed-name pooled file with just that one dataset's rows,
+    # discarding every other task's. Skip it in that case; the per-dataset
+    # files above are written normally either way.
+    sharded = any(os.environ.get(k) for k in
+                  ("GARGAML_DATASET", "GARGAML_DATASET_INDEX", "SLURM_ARRAY_TASK_ID"))
+    if sharded:
+        print("skipping pooled pattern_splitting_summary.csv: this looks like a "
+              "sharded run (GARGAML_DATASET/_INDEX or SLURM_ARRAY_TASK_ID is set) "
+              "-- rerun over the full DATASETS list to regenerate the pooled file")
+        return
+
+    pooled = pd.concat(summaries, ignore_index=True)
+    pooled.to_csv(RESULTS_DIR+"/pattern_splitting_summary.csv", index=False)
+    print("\npooled summary -> "+RESULTS_DIR+"/pattern_splitting_summary.csv")
+    print("\nGARG-AML's own targets:")
+    targets = pooled[pooled.pattern_type.isin(["GATHER-SCATTER", "SCATTER-GATHER"])]
+    print(targets[["dataset", "resolution", "pattern_type", "attempts",
+                   "pct_split", "mean_path_survival", "pct_destroyed"]]
+          .to_string(index=False))
 
 
 if __name__ == "__main__":
