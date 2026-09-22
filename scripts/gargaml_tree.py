@@ -40,6 +40,7 @@ from src.utils.features import (
 )
 from src.utils.hyperparameters import write_hyperparameters
 from src.utils.naming import gargaml_key, pretty_config
+from src.utils.runtime import env_override, select_datasets, echo_config
 
 from sklearn import tree
 from sklearn import ensemble
@@ -136,6 +137,12 @@ def dataset_settings(dataset):
 # and rerunning overwrites the other mode's output -- copy results/ aside
 # first if you want to keep both on disk at once.
 N_FOLDS = 5
+
+# Slurm overrides; the constants above remain the documented defaults.
+# GARGAML_N_FOLDS=2 is the cheap verification setting (CLAUDE.md s2) and is
+# what a GraphSAGE test run should regenerate the fold partition with.
+DATASETS = select_datasets(DATASETS)
+N_FOLDS = env_override("n_folds", N_FOLDS, int)
 
 def gargaml_tree(X, y, save = False, save_path = "results/model_tree.pkl"):
     # random_state is required, not cosmetic: sklearn permutes features at every
@@ -566,4 +573,6 @@ def run_dataset(dataset):
                 done.add(config)
 
 if __name__ == "__main__":
+    echo_config(__file__, datasets=DATASETS, n_folds=N_FOLDS,
+                cut_offs=CUT_OFFS, targets=TARGET_COLUMNS)
     main()

@@ -59,6 +59,7 @@ from src.data.graph_construction import construct_IBM_graph
 from src.data.pattern_construction import pattern_instances
 from src.utils.graph_processing import DEFAULT_RESOLUTION, community_map
 from src.utils.pattern_splitting import analyse, summarise
+from src.utils.runtime import env_override, select_datasets, echo_config, as_list
 
 # Datasets to diagnose. LI-Large is listed but is the multi-hour job -- its
 # graph alone is 176M edges.
@@ -71,6 +72,9 @@ DATASETS = ["HI-Small"]
 # because a control that is computed and comes out at 100 % is evidence that
 # the measurement is doing what it claims.
 RESOLUTIONS = [None, 1, 5, DEFAULT_RESOLUTION, 20, 50]
+
+# Slurm overrides; the constants above remain the documented defaults.
+DATASETS = select_datasets(DATASETS)
 
 
 def diagnose_dataset(dataset):
@@ -139,4 +143,5 @@ def main():
 
 
 if __name__ == "__main__":
+    echo_config(__file__, datasets=DATASETS, resolutions=RESOLUTIONS)
     main()

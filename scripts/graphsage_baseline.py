@@ -89,6 +89,7 @@ from src.utils.evaluation import (
     write_metrics,
 )
 from src.utils.naming import pretty_config
+from src.utils.runtime import env_override, select_datasets, echo_config, as_list
 
 MODEL_KEY = "graphsage_u"  # see src/utils/naming.py
 
@@ -128,6 +129,17 @@ CONFIGS = list(FEATURE_CONFIGS)  # topology (A), attributes (B)
 EPOCHS = 50       # an upper bound; early stopping decides the real number
 PATIENCE = 5      # epochs without a validation AUC-PR improvement
 CHECKPOINT_DIR = "results/checkpoints"
+
+# Slurm overrides; the constants above remain the documented defaults.
+# CHECKPOINT_DIR defaults to $VSC_SCRATCH on the cluster: checkpoints are
+# transient per-epoch state, and $VSC_DATA is the quota'd volume. Nothing
+# downstream reads them -- only train_fold's own resume does.
+DATASET = env_override("dataset", DATASET)
+CONFIGS = env_override("configs", CONFIGS, as_list)
+CHECKPOINT_DIR = env_override(
+    "checkpoint_dir",
+    os.path.join(os.environ["VSC_SCRATCH"], "gargaml", "checkpoints")
+    if os.environ.get("VSC_SCRATCH") else CHECKPOINT_DIR)
 
 # No N_FOLDS constant on purpose: the fold count and the fold values actually
 # trained on are read from results/<dataset>_folds.csv, whatever
@@ -435,4 +447,6 @@ def main():
 
 
 if __name__ == "__main__":
+    echo_config(__file__, dataset=DATASET, configs=CONFIGS,
+                checkpoint_dir=CHECKPOINT_DIR, epochs=EPOCHS, patience=PATIENCE)
     main()

@@ -85,6 +85,7 @@ from src.methods.GARGAML import (GARG_AML_node_directed_measures,
 from src.methods.gargaml_scores import define_gargaml_scores
 from src.utils.evaluation import evaluate_scores, metric_records, metrics_frame
 from src.utils.naming import gargaml_key
+from src.utils.runtime import env_override, select_datasets, echo_config, as_list
 
 DATASET = "HI-Small"
 
@@ -119,6 +120,12 @@ ALERT_SIZES = [10, 25, 50, 100, 500, 1000]
 
 # Parallelism: use up to 4 or half of CPUs
 n_cpu = min(4, cpu_count() // 2)
+
+# Slurm overrides; the constants above remain the documented defaults.
+# One institution per array task: 'top50' is far more expensive than '012'.
+DATASET = env_override("dataset", DATASET)
+INSTITUTIONS = env_override("institutions", INSTITUTIONS, as_list)
+n_cpu = env_override("n_cpu", n_cpu, int)
 
 UNDIRECTED_COLUMNS = ["node",
                       "measure_1", "measure_2", "measure_3",
@@ -334,4 +341,5 @@ def main():
 
 
 if __name__ == "__main__":
+    echo_config(__file__, dataset=DATASET, institutions=INSTITUTIONS, n_cpu=n_cpu)
     main()

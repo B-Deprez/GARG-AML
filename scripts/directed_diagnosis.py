@@ -72,6 +72,7 @@ from src.methods.directed_diagnosis import (SCORE_VARIANTS, check_against_pipeli
 from src.utils.evaluation import (SEED, evaluate_scores, metric_records,
                                   nan_metrics, write_metrics)
 from src.utils.graph_processing import graph_community
+from src.utils.runtime import env_override, select_datasets, echo_config, as_list
 
 # See the module docstring: off by default, deliberately.
 LOUVAIN = False
@@ -127,6 +128,12 @@ def synthetic_datasets(sizes=(100,)):
 
 
 DATASETS = synthetic_datasets()
+
+# Slurm overrides; the constants above remain the documented defaults.
+# A capped run (SAMPLE_NODES) deliberately writes no metrics file.
+DATASETS = select_datasets(DATASETS)
+SAMPLE_NODES = env_override("sample_nodes", SAMPLE_NODES,
+                            lambda r: None if r.lower() in ("none", "all") else int(r))
 # Widen when the budget allows. HI-Small is only meaningful sampled -- see
 # SAMPLE_NODES and the caveat in the module docstring.
 # DATASETS = synthetic_datasets((100, 10000))
@@ -326,4 +333,5 @@ def main():
 
 
 if __name__ == "__main__":
+    echo_config(__file__, datasets=DATASETS, sample_nodes=SAMPLE_NODES, louvain=LOUVAIN)
     main()
