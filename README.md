@@ -80,6 +80,18 @@ from `results-0/` and `results-aa/`.
 
 - **Reproducibility.** Louvain uses `seed=1997` and every scikit-learn split and
   estimator uses `random_state=1997`. Keep these fixed when comparing runs.
+- **Label cut-offs.** An account's label is its *propensity* — its
+  laundering-flagged transactions of the target type over all of its
+  transactions — thresholded with a strict `propensity > cutoff`. The sweep is
+  `CUT_OFFS = [0.0, 0.1, 0.2, 0.3, 0.5, 0.9]` and the reported slice is
+  `HEADLINE_CUTOFFS = [0.0, 0.1, 0.5, 0.9]`; both live in
+  `src/utils/evaluation.py` and every script imports them, so there is one list
+  rather than a copy per script. A cut-off of **0.0 means "involved in at least
+  one laundering transaction"**, the most inclusive labelling available and the
+  one with the most positives — at 0.1 an account whose single laundering
+  transaction sits among ten legitimate ones is already labelled clean. It was
+  added during the revision, so result files written earlier have no `0.0` row
+  in their `_combined.csv` matrices; re-run the model scripts to fill it.
 - **Cross-validation.** `scripts/gargaml_tree.py` carries an `N_FOLDS` switch:
   `0` reproduces the original single stratified 70/30 split, `>= 2` runs that
   many stratified folds plus a pooled out-of-fold pass. The fold partition is
@@ -113,9 +125,9 @@ from `results-0/` and `results-aa/`.
   and without it a single HI-Small node can densify to roughly 1.8 GB.
 - **Per-dataset sweep reductions.** `DATASET_SETTINGS` in
   `scripts/gargaml_tree.py` narrows the cut-off/pattern grid for one dataset
-  without touching the defaults: LI-Large runs the paper's headline cut-offs
-  (0.1 / 0.5 / 0.9) only, matching `graphsage_baseline.py`, because the full
-  grid is 360 fits and 1800 under 5-fold CV. Omitted cells are still written,
+  without touching the defaults: LI-Large runs the headline cut-offs
+  (0.0 / 0.1 / 0.5 / 0.9) only, matching `graphsage_baseline.py`, because the
+  full grid is 432 fits and 2160 under 5-fold CV. Omitted cells are still written,
   as `NaN` with a `"not in this dataset's sweep"` status, so the result
   matrices keep their published shape and the reduction is visible in the
   output rather than inferred from a missing row.

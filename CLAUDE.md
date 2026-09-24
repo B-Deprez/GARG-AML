@@ -172,7 +172,7 @@ revision. Do not add new hard-coded uses of them:
 |---|---|
 | Louvain `resolution = 10` | Already a keyword argument (`graph_community(G, resolution=10)`); every call site takes the default and `LouvainEdgeSeverance.ipynb` hardcodes 10. Task 4 sweeps it — thread the value through the call sites, do not add new literals |
 | 70/30 single split | Task 7 replaces it with **5-fold stratified CV on the IBM data only** — split logic must offer both `holdout_split` (synthetic, unchanged) and `cv_splits`; the fold partition is persisted to `results/<dataset>_folds.csv` and reused by GraphSAGE |
-| Label cut-off list | Task 2 **done** — the threshold-free ranking metrics (P@K, R@K, lift@K, TP@K, AP) are reported alongside the swept cut-offs; report through `evaluation.py`, do not add a parallel metric path |
+| Label cut-off list | Task 2 **done** — the threshold-free ranking metrics (P@K, R@K, lift@K, TP@K, AP) are reported alongside the swept cut-offs; report through `evaluation.py`, do not add a parallel metric path. The list itself now lives there too: `CUT_OFFS = [0.0, 0.1, 0.2, 0.3, 0.5, 0.9]` and `HEADLINE_CUTOFFS = [0.0, 0.1, 0.5, 0.9]`, imported by `gargaml_tree.py`, `gargaml_IF.py`, `distribution_scores.py`, `graphsage_baseline.py` and `reporting.py`. **Do not re-declare a cut-off list in a script.** Every result file written before 2026-09-24 lacks the 0.0 row |
 | Full-graph view (no bank filter) | Task 5 adds single-bank views — `construct_IBM_graph(..., banks=None)` and `define_ML_labels(..., banks=None)` keep today's behaviour by default; a view is named `<dataset>_bank<b>` (or `<dataset>_banktop<k>` for a pooled institution) and flows through as the `dataset` string. Do not special-case views downstream |
 | Model names (`gargaml tree undirected` vs `GARG-AML Undir. Tree`) | Task 12 standardises — `src/utils/naming.py` is the one canonical scheme; route new labels through `pretty()`, or `pretty_config()` when a task-3 feature config is involved |
 | Results output directory | Was hardcoded `results/` (plus two scripts hardcoding archive paths `results-0/`/`results-3/`) everywhere. Now `GARGAML_RESULTS_DIR`, resolved via `src/utils/runtime.py::resolve_results_dir()` exactly like `GARGAML_N_FOLDS`/`GARGAML_DATASET` — every `.slurm` job defaults it to `results-revision/`; bare local runs still default to `results/` |
@@ -539,9 +539,13 @@ revision tasks extend rather than replace them.
   existing nodes reused as sender/receiver/mule).
 
 **Label construction (edge → node).** Per account, propensity = laundering-labelled
-transactions / total transactions. Positive if propensity exceeds a cut-off; scripts
-sweep `[0.1, 0.2, 0.3, 0.5, 0.9]`, paper headlines 0.1 / 0.5 / 0.9. Imbalance is extreme
-(often <0.1 % positives).
+transactions / total transactions. Positive if propensity **strictly exceeds** a
+cut-off. The published sweep was `[0.1, 0.2, 0.3, 0.5, 0.9]` with headlines
+0.1 / 0.5 / 0.9; the revision added **0.0**, which the strict `>` makes meaningful —
+"involved in at least one laundering transaction". The sweep is now
+`[0.0, 0.1, 0.2, 0.3, 0.5, 0.9]` and the headline slice `[0.0, 0.1, 0.5, 0.9]`, both
+defined once in `src/utils/evaluation.py` (`CUT_OFFS` / `HEADLINE_CUTOFFS`) and imported
+everywhere. Imbalance is extreme (often <0.1 % positives), least so at 0.0.
 
 **Models**
 - Pre-processing: Louvain (NetworkX, resolution 10, seed 1997), intra-community edges
