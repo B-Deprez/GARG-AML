@@ -1,13 +1,13 @@
 #!/bin/bash
-# Reporting -- scripts/build_tables.py. Runs LAST.
+# Reporting -- scripts/build_tables.py. Runs last.
 #
-# WHAT     Reads every tidy *_metrics.csv on disk and renders the revision's
-#          tables as LaTeX + CSV, plus results/table_coverage.csv. Recomputes
-#          nothing, which is why it takes seconds and can be rerun after every
-#          job finishes. It prints a coverage report FIRST, skips tables with no
-#          rows, and renders unfittable cells as "--" -- that gap-reporting is
-#          the behaviour the revision wants, so do not suppress it.
-# SUBMIT   Chain it with afterany, NOT afterok, so one failed arm does not block
+# WHAT     Reads every tidy *_metrics.csv on disk and renders the result tables
+#          as LaTeX + CSV, plus table_coverage.csv. It recomputes nothing, which
+#          is why it takes seconds and can be rerun after every job finishes. It
+#          prints a coverage report first, skips tables with no rows, and renders
+#          unfittable cells as "--"; that gap reporting is intended, so do not
+#          suppress it.
+# SUBMIT   Chain it with afterany, not afterok, so one failed arm does not block
 #          the tables:
 #            slurm/submit.sh slurm/collect.slurm all --dependency=afterany:$j1:$j2
 # ARRAY    None.
@@ -16,18 +16,16 @@
 # RESUMES  Not applicable -- idempotent, rerun it freely.
 # CPUS     1 -- pandas only, no graph work.
 # MEM      8g -- it reads small tidy CSVs, not transaction files.
-# TIME     00:15:00 -- the docstring says seconds; this is slack for the timing
+# TIME     00:15:00 -- the tables take seconds; this is slack for the timing
 #          concatenation below.
 #
-# NOTE     build_tables.py does NOT read the timing files, so GARG-AML runtime
+# NOTE     build_tables.py does not read the timing files, so GARG-AML runtime
 #          never enters its tables. The step at the end of this job gathers the
-#          per-task timing rows into <dir>/timing_all.csv for Fig. 6-style
-#          work, where <dir> is GARGAML_RESULTS_DIR (results-revision/ under
-#          Slurm by default). The two partial_observability metrics files are
-#          no longer silently dropped by the filename regex -- src/utils/
-#          reporting.py now parses a direction-less tidy filename too, falling
-#          back to its own `direction` column -- so task 5's appendix numbers
-#          now reach a table; see slurm/README.md.
+#          per-task timing rows into <dir>/timing_all.csv for runtime figures,
+#          where <dir> is $GARGAML_RESULTS_DIR. src/utils/reporting.py also
+#          parses a direction-less tidy filename, falling back to its own
+#          `direction` column, so the partial-observability metrics reach a
+#          table too; see slurm/README.md.
 
 #SBATCH --job-name=gargaml_collect
 #SBATCH --output=gargaml_collect.out
@@ -59,12 +57,12 @@ python -u scripts/build_tables.py
 
 # Concatenate the per-task timing files into one frame. Each task writes its own
 # file under <dir>/timing/ carrying dataset, direction, seconds, worker count,
-# job id, host and timestamp -- unlike the legacy <dir>/time_results_*.txt,
-# which is append-shared by three scripts and records only "<dataset>: <secs>".
-# The legacy files are still written, so VisualisationRunTime.ipynb is unaffected.
+# job id, host and timestamp. The <dir>/time_results_*.txt files are written as
+# well -- append-shared by three scripts, one "<dataset>: <secs>" line each --
+# and are what VisualisationRunTime.ipynb reads.
 # The heredoc delimiter is quoted ('PYEOF'), so shell variables do not expand
-# inside it -- GARGAML_RESULTS_DIR is read from the environment directly below
-# instead of being interpolated into the script text.
+# inside it -- GARGAML_RESULTS_DIR is read from the environment below instead of
+# being interpolated into the script text.
 python -u - <<'PYEOF'
 import glob
 import os

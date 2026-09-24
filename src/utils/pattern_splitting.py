@@ -1,16 +1,11 @@
 """
-What the Louvain pre-processing destroys (task 4, the second half of R2-M3).
+What the Louvain pre-processing destroys.
 
-The severance figures say the pre-processing discards most of the graph --
-around 88 % of HI-Small's edges at the published resolution of 10. On its own
-that number settles nothing: it is either catastrophic or irrelevant
-depending entirely on *which* edges go. R2-M3 makes the specific claim:
-
-    removing all inter-community edges alters the very neighbourhoods being
-    scored; **a pattern straddling two communities is destroyed**
-
-This module tests that claim per known laundering attempt instead of
-conceding it.
+The severance figures say the pre-processing discards most of the graph's
+edges. On its own that number settles nothing: it is either catastrophic or
+irrelevant depending entirely on *which* edges go. This module measures, per
+known laundering attempt, whether the structure GARG-AML looks for survives
+the reduction.
 
 Edge survival is not the number that matters
 --------------------------------------------
@@ -28,9 +23,8 @@ reported, and ``path_survival`` is the one to read:
     fraction of the attempt's own directed 2-paths (``a -> b -> c``, all
     three inside the attempt) whose **both** legs survived.
 ``detectable_after``
-    whether *any* 2-path survived. This is the binary the reviewer's
-    objection is really about: once it is false, no resolution of the score
-    can find that pattern, because the structure it looks for is gone.
+    whether *any* 2-path survived. Once it is false, no resolution of the
+    score can find that pattern, because the structure it looks for is gone.
 
 Patterns with no 2-path to begin with
 -------------------------------------
@@ -38,8 +32,8 @@ FAN-OUT and FAN-IN are one hop deep by construction, so ``paths_total`` is 0
 and the path columns are NaN rather than 0 -- there is nothing to destroy,
 and scoring them as "100 % destroyed" or "100 % survived" would both be
 wrong. GARG-AML targets GATHER-SCATTER and SCATTER-GATHER, which are exactly
-the two-hop shapes, so those carry the argument; :func:`summarise` keeps the
-breakdown by type rather than pooling.
+the two-hop shapes, so :func:`summarise` keeps the breakdown by type rather
+than pooling.
 
 The partition is the pipeline's own
 -----------------------------------
@@ -164,10 +158,9 @@ def resolution_sort_key(value):
     """Sort key putting the no-Louvain control first, then ascending resolution.
 
     ``resolution`` holds ``"off"`` beside numbers, so the column is object
-    dtype and both ``groupby`` and a plain sort order it as text -- which
-    puts 10 and 20 before 5. Every output that a reader opens has to be
-    ordered by how much the setting reduces the graph, because that is the
-    axis the result is read along.
+    dtype and both ``groupby`` and a plain sort order it as text, which puts
+    10 and 20 before 5. The axis a reader follows is how much the setting
+    reduces the graph.
     """
     return (0, 0.0) if value == "off" else (1, float(value))
 

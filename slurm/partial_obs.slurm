@@ -1,12 +1,12 @@
 #!/bin/bash
-# Task 5 appendix, partial observability -- scripts/partial_observability.py.
+# Partial observability -- scripts/partial_observability.py.
 #
-# WHAT     Compares the PURE GARG-AML score on the full graph against the same
+# WHAT     Compares the pure GARG-AML score on the full graph against the same
 #          score on a single-bank view, for that institution's own clients,
-#          with Louvain OFF on both sides -- otherwise the two regimes are
+#          with Louvain off on both sides -- otherwise the two regimes are
 #          reduced by different partitions and the degradation cannot be
-#          attributed to the missing edges. Its "full" column is therefore
-#          deliberately NOT the published Tables 10-11 number.
+#          attributed to the missing edges. Its "full" column is therefore not
+#          the main-table number, which is computed with Louvain on.
 # SUBMIT   slurm/submit.sh slurm/partial_obs.slurm top50
 #          The positional arg names the institution, not a dataset:
 #            slurm/submit.sh slurm/partial_obs.slurm 012
@@ -14,20 +14,18 @@
 #          It is exported as GARGAML_INSTITUTIONS, so one institution per job.
 # ARRAY    None -- there are two institutions and they differ ~14x in size.
 # PREREQ   None -- reads only data/. Independent of stage 1.
-# RESUMES  NO.
-# CPUS     8 -> the script's 4-worker pool (it is NOT serial: it uses the same
+# RESUMES  No.
+# CPUS     8 -> the script's 4-worker pool (it is not serial: it uses the same
 #          min(4, cpu_count()//2) pool as the measure scripts).
-# MEM      180g. This is the memory-hungry job in the set and the reason is in
-#          the script's own docstring: with Louvain off, second-order
-#          neighbourhoods reach ~14,900 accounts, and the measure functions
-#          densify each with nx.adjacency_matrix(...).toarray() -- about 1.8 GB
-#          for a single node. Only the bank's clients are scored, which is what
-#          keeps it finite. 180g is headroom over that per-node peak across 4
-#          concurrent workers (4 x 1.8 GB is the floor, not the ceiling).
-# TIME     12:00:00. Bank 012 (12,180 nodes) is far cheaper than top50 (164,822);
-#          the two output files on disk are ~3 h apart, which is consistent with
-#          top50 taking hours but is a file mtime, not a measurement. 12 h is
-#          deliberate headroom for top50.
+# MEM      180g, the largest request in the set, for the reason in the script's
+#          own docstring: with Louvain off, second-order neighbourhoods reach
+#          ~14,900 accounts, and the measure functions densify each with
+#          nx.adjacency_matrix(...).toarray() -- about 1.8 GB for a single node.
+#          Scoring only the bank's clients is what keeps it finite. 180g is
+#          headroom over that per-node peak across 4 concurrent workers
+#          (4 x 1.8 GB is the floor, not the ceiling).
+# TIME     12:00:00. Bank 012 (12,180 nodes) is far cheaper than top50 (164,822
+#          nodes), which takes hours; 12 h is deliberate headroom for top50.
 
 #SBATCH --job-name=gargaml_partial_obs
 #SBATCH --output=gargaml_partial_obs.out

@@ -7,7 +7,7 @@
 #   slurm/submit.sh slurm/tree.slurm LI-Large --time=16:00:00 --mem=200g
 #   slurm/submit.sh slurm/measures_synth_dir.slurm synth --array=0-21 --time=00:30:00
 #
-# The dataset is passed through BOTH as --job-name and as the script's $1, so
+# The dataset is passed through both as the job name and as the script's $1, so
 # "squeue" and the FAIL mail say which arm failed rather than just which stage.
 # Prints the job id on stdout (sbatch --parsable), so it chains:
 #

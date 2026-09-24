@@ -1,34 +1,28 @@
 """
-Hyperparameter provenance for every fitted model (task 9).
+Hyperparameter provenance for every fitted model.
 
-R1-4 asks how the tree/boosting hyperparameters -- and the Louvain
-resolution -- were chosen: the search space, the selection criterion, and
-whether any tuning touched the test split.
-
-The honest answer, and the reason this module is a registry rather than a
-tuning log: **no hyperparameter search was ever run**. Every value is
-either a library default inherited untouched or a single value fixed
-a priori before any result was computed, and no selection procedure of
-any kind consulted the test split -- there was no selection procedure.
-This module states that in a form that goes straight into the appendix,
+A registry rather than a tuning log, because **no hyperparameter search is
+run**: every value is either a library default inherited untouched or a
+single value fixed a priori, and no selection procedure consults the test
+split. This module states that in the form the appendix table takes,
 instead of leaving a reader to reconstruct it from constructor calls
 scattered across five scripts.
 
-Three design points worth keeping:
+Three design points:
 
 1. **Defaults are read at runtime, not transcribed.** Most of the
-   published configuration is whatever scikit-learn's defaults happen to
-   be: the paper's "100 trees, max_depth 3, learning_rate 0.1" is
+   configuration is whatever scikit-learn's defaults are: the paper's
+   "100 trees, max_depth 3, learning_rate 0.1" is
    ``GradientBoostingClassifier``'s default triple, not a chosen setting.
    A hardcoded copy would go stale on the next scikit-learn upgrade and
    the appendix would then describe a run that never happened, so
    :func:`hyperparameter_schema` instantiates each estimator and reads
-   ``get_params()``. The same trick covers the Louvain resolution and the
-   split sizes, which are read from the signatures of
+   ``get_params()``. The same holds for the Louvain resolution and the
+   split sizes, read from the signatures of
    :func:`~src.utils.graph_processing.graph_community` and
    :func:`~src.utils.evaluation.holdout_split`. The ``source`` column
-   marks which values this repository set deliberately (``explicit``) and
-   which came from the library (``library_default``).
+   marks which values this repository sets (``explicit``) and which come
+   from the library (``library_default``).
 
 2. **Seeds are not hyperparameters.** ``random_state=1997`` appears in
    every constructor but controls reproducibility, not model capacity, so
@@ -51,8 +45,7 @@ Runnable standalone::
 
     python -m src.utils.hyperparameters
 
-so the appendix table can be regenerated without re-running an
-hours-long fit.
+so the appendix table can be regenerated without re-running a fit.
 """
 
 from __future__ import annotations
@@ -67,9 +60,8 @@ from src.utils.evaluation import CV_FOLDS, SEED, holdout_split
 from src.utils.graph_processing import graph_community
 from src.utils.naming import pretty
 
-# The three provenance answers R1-4 asks for. They are identical for every
-# row in this registry, which is the finding, not an omission: state it
-# once here and repeat it per row so the CSV is self-contained.
+# The three provenance answers. They are identical for every row in this
+# registry, and are repeated per row so the CSV is self-contained.
 SEARCH_SPACE = "not searched"
 SELECTION_CRITERION = "none -- no model selection was performed"
 TUNED_ON_TEST = "no"
@@ -81,8 +73,7 @@ SEED_PARAMS = {"random_state", "seed"}
 BOOKKEEPING_PARAMS = {"verbose", "verbose_interval", "n_jobs", "warm_start"}
 
 # What each script passes explicitly. Everything else in the estimator is
-# a library default; see the module docstring on why those are not copied
-# out here.
+# a library default, read at runtime rather than copied out here.
 TREE_PARAMS = {"min_samples_leaf": 10, "random_state": SEED}
 BOOST_PARAMS = {"min_samples_leaf": 10, "random_state": SEED}
 IF_PARAMS = {"random_state": SEED}
@@ -95,9 +86,9 @@ _SKLEARN_MODELS = [
     ("gargaml_if_d", ensemble.IsolationForest, IF_PARAMS),
 ]
 
-# GraphSAGE (task 1). Declared rather than read from the estimator,
-# because importing src.methods.graphsage pulls in torch and
-# torch-geometric and this module must stay importable without them.
+# GraphSAGE. Declared rather than read from the estimator, because
+# importing src.methods.graphsage pulls in torch and torch-geometric and
+# this module stays importable without them.
 # :func:`check_graphsage_declaration` verifies the declaration against
 # ``train_fold``'s actual signature whenever torch *is* available, so the
 # two cannot drift apart silently.
@@ -194,15 +185,13 @@ def _graphsage_rows():
 
 
 def _preprocessing_rows():
-    """Louvain, which R1-4 names alongside the model hyperparameters.
+    """Louvain, reported alongside the model hyperparameters.
 
-    The resolution is read from ``graph_community``'s signature rather
-    than restated, so this row cannot claim a value the pipeline is not
-    using -- task 4 is about to thread that argument through the call
-    sites, and the table has to follow it.
+    The resolution is read from ``graph_community``'s signature rather than
+    restated, so this row cannot claim a value the pipeline is not using.
     """
-    note = ("chosen a priori for smaller communities; its sensitivity is "
-            "the subject of task 4, which sweeps it")
+    note = ("chosen a priori for smaller communities; swept by the "
+            "_res<r> dataset arms")
     return [
         _row("louvain", "Louvain community detection", "preprocessing",
              "resolution", _default(graph_community, "resolution"),
@@ -220,9 +209,8 @@ def _preprocessing_rows():
 def _evaluation_rows():
     """The split protocol, for the "did tuning see the test set" question.
 
-    Not hyperparameters, but the table is where a reader looks to answer
-    R1-4's third clause, and both values are read from the code that
-    performs the split.
+    Not hyperparameters, but the table is where a reader looks for them,
+    and both values are read from the code that performs the split.
     """
     return [
         _row("split", "Evaluation protocol", "evaluation", "test_size",
@@ -230,17 +218,17 @@ def _evaluation_rows():
              role="protocol", note="single stratified holdout (synthetic runs)"),
         _row("split", "Evaluation protocol", "evaluation", "n_splits",
              CV_FOLDS, "explicit", role="protocol",
-             note="stratified CV on the IBM data (task 7)"),
+             note="stratified CV on the IBM data"),
         _row("split", "Evaluation protocol", "evaluation", "seed", SEED,
              "explicit"),
     ]
 
 
 def hyperparameter_schema():
-    """Every fitted model's configuration, with its provenance (task 9).
+    """Every fitted model's configuration, with its provenance.
 
     One row per parameter. ``source`` separates the values this repository
-    chose from the library defaults it inherited; ``role`` separates real
+    sets from the library defaults it inherits; ``role`` separates real
     hyperparameters from seeds, bookkeeping and structural choices. An
     appendix table is this frame filtered to
     ``role == "hyperparameter"``.
@@ -260,9 +248,8 @@ def check_graphsage_declaration():
     Returns a list of human-readable mismatches, or an empty list when the
     declaration is faithful -- including when torch is not installed, in
     which case there is nothing to check against and the declaration is
-    taken at face value. This exists because GRAPHSAGE_PARAMS is the one
-    part of the registry that is copied rather than read (see the module
-    docstring), and a stale copy would misreport a published run.
+    taken at face value. GRAPHSAGE_PARAMS is the one part of the registry
+    that is copied rather than read, and a stale copy would misreport a run.
     """
     try:
         from src.methods.graphsage import train_fold
@@ -290,8 +277,8 @@ def check_graphsage_declaration():
 def write_hyperparameters(dataset, results_dir="results"):
     """Write the registry to ``results/<dataset>_hyperparameters.csv``.
 
-    Called once per run beside the per-config feature schema (task 10), so
-    every result directory carries the configuration that produced it.
+    Called once per run beside the per-config feature schema, so every
+    result directory carries the configuration that produced it.
     """
     path = results_dir+"/"+dataset+"_hyperparameters.csv"
     hyperparameter_schema().to_csv(path, index=False)

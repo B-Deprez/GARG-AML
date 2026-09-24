@@ -1,32 +1,30 @@
 """Environment overrides for the run-scope constants in ``scripts/``.
 
-Every runnable script in this repository configures its run with module-level
-constants -- ``datasets``, ``N_FOLDS``, ``CONFIGS`` and so on -- which the
-documented workflow edits between submissions. That is fine by hand and wrong
-on a cluster: a Slurm array task cannot edit the source it shares with 65 of
-its siblings, and a run configured by an edit is not reproducible from its log.
+Every runnable script configures its run with module-level constants --
+``datasets``, ``N_FOLDS``, ``CONFIGS`` and so on. Editing them by hand is fine
+locally and wrong on a cluster: a Slurm array task cannot edit the source it
+shares with 65 of its siblings, and a run configured by an edit is not
+reproducible from its log.
 
-This module keeps the constants exactly where they are, as the documented
-defaults, and lets ``GARGAML_<NAME>`` override one for the duration of a job::
+The constants stay where they are, as the defaults, and ``GARGAML_<NAME>``
+overrides one for the duration of a job::
 
     DATASETS = env_override("datasets", DATASETS, as_list)
     N_FOLDS  = env_override("n_folds", 5, int)
 
-Running a script bare therefore behaves exactly as it does today; the Slurm
-scripts set the environment instead of patching the file.
+Running a script bare therefore uses the defaults; the Slurm scripts set the
+environment instead of patching the file.
 
-``select_datasets`` is the one the array jobs need: it turns
-``SLURM_ARRAY_TASK_ID`` into a single entry of the work list, so one task runs
-one dataset. It fails loudly on an out-of-range index rather than silently
-running nothing -- an array task that exits 0 having done no work is the
-failure mode that is hardest to notice afterwards.
+``select_datasets`` turns ``SLURM_ARRAY_TASK_ID`` into a single entry of the
+work list, so one array task runs one dataset. It fails loudly on an
+out-of-range index rather than running nothing, since an array task that exits
+0 having done no work is the failure mode hardest to notice afterwards.
 
 ``write_csv`` is here rather than in ``evaluation.py`` because stage 1 needs it
-too and does not import that module. It exists because every result write in
-this repository is ``df.to_csv(final_path)`` straight onto the destination: a
-wall-time kill during the write leaves a truncated CSV at the real filename,
-which every reader downstream parses happily as a short file. Skip-if-exists
-resume (``GARGAML_FORCE``) would otherwise treat such a file as finished work.
+too and does not import that module. A plain ``df.to_csv(final_path)`` killed
+on wall time leaves a truncated CSV at the real filename, which every reader
+downstream parses happily as a short file and which the skip-if-exists resume
+(``GARGAML_FORCE``) would treat as finished work.
 """
 
 import os
@@ -78,7 +76,7 @@ def select_datasets(default_datasets):
     2. ``GARGAML_DATASETS`` -- a comma-separated work list, used verbatim.
     3. ``GARGAML_DATASET_INDEX``, else ``SLURM_ARRAY_TASK_ID`` -- an index into
        ``default_datasets``. Out of range is a hard error.
-    4. Nothing set -- ``default_datasets`` unchanged, i.e. today's behaviour.
+    4. Nothing set -- ``default_datasets`` unchanged.
 
     Always returns a list, so the caller's ``for dataset in datasets`` loop is
     untouched.
@@ -118,10 +116,9 @@ def select_datasets(default_datasets):
 def resolve_results_dir(default="results"):
     """``GARGAML_RESULTS_DIR`` override, or *default* when unset.
 
-    Every runnable script's own results/measures paths should be built from
-    this, not from a literal "results/" -- that is what lets a full rerun
-    land in a fresh folder (e.g. GARGAML_RESULTS_DIR=results-revision)
-    without touching the archives at results/, results-0/, results-3/.
+    Every script builds its results and measures paths from this rather than
+    from a literal "results/", so a full rerun can land in a fresh folder
+    without touching an existing one.
     """
     return env_override("results_dir", default)
 
@@ -129,9 +126,8 @@ def resolve_results_dir(default="results"):
 def echo_config(script, **knobs):
     """Print the resolved run configuration, so the .out file reconstructs it.
 
-    Slurm identity is included when present: the pairing of a job id with the
-    knobs it ran under is exactly what is missing from the archived runs whose
-    provenance can no longer be established.
+    Slurm identity is included when present, which is what pairs a job id
+    with the settings it ran under.
     """
     parts = []
     for key in ("SLURM_JOB_ID", "SLURM_ARRAY_JOB_ID", "SLURM_ARRAY_TASK_ID",
@@ -148,9 +144,8 @@ def echo_config(script, **knobs):
 def force_rerun():
     """``GARGAML_FORCE=1`` -- recompute even when the output is already on disk.
 
-    The measure scripts overwrite in place, so a resume guard has to be
-    escapable: regenerating the directed measures after the ``c5fba86`` fix is
-    precisely a case where the existing file is the thing to replace.
+    The measure scripts overwrite in place, so the resume guard has to be
+    escapable for a run whose point is to replace an existing file.
     """
     return env_override("force", False, as_bool)
 
@@ -197,12 +192,12 @@ def write_csv(df, path, **kwargs):
 def timing_path(dataset, direction, results_dir="results"):
     """Per-task timing file under ``results/timing/``.
 
-    One file per task, because the legacy ``results/time_results_*.txt`` are
-    opened in append mode and shared by three scripts, which under an array job
-    is a race and, worse, unattributable afterwards: a row is ``<dataset>:
-    <seconds>`` with no job, host, worker count or date. The collector
-    concatenates these; the legacy file keeps being appended to as well, so
-    notebooks/VisualisationRunTime.ipynb is unaffected.
+    One file per task, because ``results/time_results_*.txt`` is opened in
+    append mode and shared by three scripts, which under an array job is a
+    race and is unattributable afterwards: a row there is ``<dataset>:
+    <seconds>`` with no job, host, worker count or date. That file keeps
+    being appended to as well, so notebooks/VisualisationRunTime.ipynb reads
+    it unchanged.
     """
     directory = os.path.join(results_dir, "timing")
     os.makedirs(directory, exist_ok=True)

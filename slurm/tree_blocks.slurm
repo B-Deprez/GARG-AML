@@ -1,15 +1,15 @@
 #!/bin/bash
-# Stage 2, block-only ablation (task 3) -- scripts/gargaml_tree_blocks.py.
+# Stage 2, block-only ablation -- scripts/gargaml_tree_blocks.py.
 #
 # WHAT     A thin entry point onto gargaml_tree.py's shared path with
-#          CONFIG = "blocks", i.e. the (b) feature group (block densities and
-#          sizes) that the published model never received.
+#          CONFIG = "blocks": the block densities and sizes on their own,
+#          without the GARG-AML score.
 # SUBMIT   sbatch slurm/tree_blocks.slurm
 # ARRAY    None.
 # PREREQ   The same stage-1 measures as slurm/tree.slurm, same dataset name.
-# RESUMES  NO -- same end-of-run metric writes as tree.slurm.
+# RESUMES  No -- same end-of-run metric writes as tree.slurm.
 # CPUS/MEM 8 / 64g, identical reasoning to tree.slurm: one feature config
-#          instead of four, so this is strictly the cheaper job.
+#          instead of four, so this is the cheaper job.
 # TIME     02:00:00 -- one config of tree.slurm's four.
 #
 # NOTE     gargaml_tree_blocks.py holds its dataset choice inside main(), not

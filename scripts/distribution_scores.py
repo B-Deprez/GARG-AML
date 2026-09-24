@@ -19,42 +19,28 @@ import timeit
 import matplotlib.pyplot as plt
 import numpy as np
 
-# RESULTS_DIR used to be hardcoded to results-0 (writes) / results-3 (reads) as an
-# archive workaround; it is now the same GARGAML_RESULTS_DIR every other script uses.
-# Set GARGAML_RESULTS_DIR=results-3 explicitly to reproduce the old pre-c5fba86 archive reads.
 RESULTS_DIR = resolve_results_dir()
 
-# Task 7: the base GARG-AML score gets a per-fold breakdown too, and this one
-# is free. The score is deterministic and nothing is fitted, so it carries no
-# model variance and does not depend on which fold an account lands in. Two
-# consequences worth keeping straight:
+# Per-fold breakdown of the base GARG-AML score. The score is deterministic
+# and nothing is fitted, so the pooled out-of-fold value equals the
+# full-population value by construction and the per-fold spread is pure
+# evaluation-slice noise -- the noise floor against which the tree/boost fold
+# spread is read.
 #
-#   * The pooled out-of-fold value is **identical** to the full-population
-#     value, by construction rather than by luck -- the same score vector is
-#     simply partitioned. No published base-score number moves.
-#   * The per-fold spread is therefore pure evaluation-slice noise. That is
-#     the point: it is the noise floor the tree/boost fold spread has to be
-#     read against, which is what turns a "+/- 0.02" into an interpretable
-#     number.
-#
-# The partition is **read** from results/<dataset>_folds.csv (written by
+# The partition is read from results/<dataset>_folds.csv (written by
 # gargaml_tree.py with N_FOLDS >= 2), never re-derived, so the base score is
 # paired fold for fold with the tree models and GraphSAGE.
 #
 # Set to False to skip the per-fold rows entirely. It also falls back on its
-# own whenever no partition exists -- which is the normal state for the
-# synthetic grid (task 7 scopes CV to the IBM data and explicitly leaves the
-# 66 synthetic datasets on the single split) and for an IBM run made with
-# N_FOLDS = 0. In every un-folded case the full-population numbers below are
-# computed and written exactly as before.
+# own whenever no partition exists, which is the normal state for the
+# synthetic grid and for an IBM run made with N_FOLDS = 0. In every un-folded
+# case the full-population numbers below are computed and written as usual.
 USE_FOLDS = True
 
-# This file's own convention for "not available" is -1 (see the fillna(-1) calls
-# below), not NaN: results are logged as repr()'d Python literals in free-text
-# files, read back with a bare eval() in notebooks/VisualisationResults.ipynb that
-# has no `nan` name bound in scope -- a stray NaN anywhere would raise there and
-# (per that notebook's own except) zero out every value on the line, not just the
-# undefined one. The raw GARG-AML score has no natural 0/1 prediction (range
+# This file's convention for "not available" is -1, not NaN: results are logged
+# as repr()'d Python literals in free-text files and read back with a bare
+# eval() in notebooks/VisualisationResults.ipynb, which has no `nan` name bound
+# in scope. The raw GARG-AML score has no natural 0/1 prediction (range
 # [-1, 1], not a probability), so evaluate_scores reports precision/f1 as NaN;
 # _sanitise substitutes -1 before anything gets str()'d into a log line.
 def _sanitise(value):
@@ -104,7 +90,7 @@ def distribution_scores_IBM_plots(dataset, results_df, str_directed, str_supervi
     print("="*10)
     print("Data loaded")
 
-    cut_offs = CUT_OFFS # the canonical sweep, 0.0 included -- see src/utils/evaluation.py
+    cut_offs = CUT_OFFS # the canonical sweep -- see src/utils/evaluation.py
     columns = ['Is Laundering', 'FAN-OUT', 'FAN-IN', 'GATHER-SCATTER', 'SCATTER-GATHER', 'CYCLE', 'RANDOM', 'BIPARTITE', 'STACK']
 
     n = len(cut_offs)
@@ -212,17 +198,16 @@ def _fold_records(labels_gargaml_full, y_true, folds_df, cut_off, column, contex
 
     Returns ``[]`` when there is no partition for this cell -- either no
     folds file at all (the synthetic grid, or an N_FOLDS=0 IBM run) or a
-    cell task 7 skipped for too few positives. The caller's
-    full-population row is written either way, so an empty return here
-    costs nothing.
+    cell with too few positives to fold. The caller's full-population row
+    is written either way, so an empty return here costs nothing.
 
     The pooled row (``fold = -1``) is computed over the union of the test
     folds rather than over the whole frame. Those two populations should
     coincide, but need not: this script's ``labels_gargaml_full`` is an
-    *outer* merge, so it can hold accounts that never reached
+    outer merge, so it can hold accounts that never reached
     gargaml_tree.py's feature table and therefore never entered the
-    partition. ``n_test`` is written on every row precisely so such a
-    mismatch is visible instead of assumed away.
+    partition. ``n_test`` is written on every row so such a mismatch is
+    visible rather than assumed away.
     """
     assignments = fold_assignments(folds_df, cut_off, column)
     if not assignments:
@@ -272,20 +257,19 @@ def distribution_scores_IBM(dataset, results_df, str_directed, str_supervised):
     labels_gargaml_full = laundering_combined.merge(results_df[["GARGAML"]], left_index=True, right_index=True, how="outer").fillna(-1)
     del laundering_combined
 
-    # Evaluated on every account, not a 30% slice -- this score is never fit to
-    # anything, and this keeps the published numbers unchanged from earlier
-    # revisions (same decision as gargaml_IF.py, for the same reason).
+    # Evaluated on every account, not on a held-out slice: this score is never
+    # fit to anything (same as gargaml_IF.py, for the same reason).
     y_pred = labels_gargaml_full["GARGAML"].values
 
-    # Task 7's partition, if one was written. None is a normal state, not an
+    # The fold partition, if one was written. None is a normal state, not an
     # error -- see USE_FOLDS.
     folds_df = read_folds(dataset, results_dir=RESULTS_DIR) if USE_FOLDS else None
     if folds_df is None:
         print("No fold partition at "+folds_path(dataset, results_dir=RESULTS_DIR)+
-              ": reporting full-population metrics only (task 7's per-fold "
+              ": reporting full-population metrics only (the per-fold "
               "breakdown needs gargaml_tree.py run with N_FOLDS >= 2 first).")
     else:
-        print("Per-fold breakdown on task 7's persisted partition, "
+        print("Per-fold breakdown on the persisted fold partition, "
               +str(folds_df["fold"].nunique())+" folds. The base score is not "
               "fitted, so the pooled out-of-fold row equals the full-population "
               "row and the fold spread is the evaluation-slice noise floor.")
@@ -293,7 +277,7 @@ def distribution_scores_IBM(dataset, results_df, str_directed, str_supervised):
     model_key = gargaml_key("base", str_directed == "directed")
     records = []
 
-    cut_offs = CUT_OFFS # the canonical sweep, 0.0 included -- see src/utils/evaluation.py
+    cut_offs = CUT_OFFS # the canonical sweep -- see src/utils/evaluation.py
     columns = ['Is Laundering', 'FAN-OUT', 'FAN-IN', 'GATHER-SCATTER', 'SCATTER-GATHER', 'CYCLE', 'RANDOM', 'BIPARTITE', 'STACK']
 
     n = len(cut_offs)
@@ -311,10 +295,8 @@ def distribution_scores_IBM(dataset, results_df, str_directed, str_supervised):
                            target=column, seed=SEED)
 
             try:
-                # No natural 0/1 prediction for a raw score -- precision/f1 come
-                # back NaN rather than invented at some threshold (the range is
-                # [-1, 1], so thresholding at 0.5 the way this used to would
-                # predict almost everything negative).
+                # No natural 0/1 prediction for a raw score -- precision/f1
+                # come back NaN rather than invented at some threshold.
                 metrics = evaluate_scores(y_true, y_pred)
                 result_list = [_sanitise(metrics[name]) for name in metric_names()]
                 status = "ok"
@@ -324,39 +306,34 @@ def distribution_scores_IBM(dataset, results_df, str_directed, str_supervised):
                 metrics, status = nan_metrics(), "skipped: "+str(exc)
 
             # The full-population row keeps fold = NaN: it is neither one of
-            # the folds nor the pooled pass, it is the number this script has
-            # always published (and the one written to the .txt log below).
+            # the folds nor the pooled pass, and it is the number written to
+            # the .txt log below.
             records += metric_records(metrics, status=status,
                                       n_test=len(y_true), n_pos=int(y_true.sum()),
                                       fold=np.nan, **context)
             records += _fold_records(labels_gargaml_full, y_true, folds_df,
                                      cut_off, column, context)
 
-            # Extra elements after index 3 (the new ranking metrics, in the fixed
-            # order metric_names() returns) are safe: VisualisationResults.ipynb
-            # reads results[0..3] by position, not by unpacking a fixed-length
-            # tuple, so it ignores anything past index 3. What is NOT safe is a
-            # nested dict or any other ':' here: that notebook cell finds the
-            # data with line.split(': ', maxsplit=3), so more than 3 occurrences
-            # of ': ' anywhere on the line -- which a dict repr's `'key': value`
-            # pairs supply in abundance -- truncates the line before the real
-            # list. A flat list of plain numbers has none, so it's the only
-            # shape that's actually safe to append here. Also no '_' in the
+            # Elements after index 3 (the ranking metrics, in the fixed order
+            # metric_names() returns) are safe: VisualisationResults.ipynb
+            # reads results[0..3] by position, not by unpacking a
+            # fixed-length tuple. What is not safe is a nested dict or any
+            # other ':' here: that notebook cell finds the data with
+            # line.split(': ', maxsplit=3), so more than 3 occurrences of
+            # ': ' anywhere on the line truncate it before the real list. A
+            # flat list of plain numbers has none. Nor a third '_' in the
             # label text: that same cell parses the whole line with
-            # line.split('_'), not just the dataset/pattern prefix, so a third
-            # underscore anywhere else shifts every index after it.
+            # line.split('_'), so an extra underscore anywhere shifts every
+            # index after it.
             with open(RESULTS_DIR+'/results_performance_IBM_'+str_directed+'.txt', 'a') as f:
                 f.write(dataset+'_'+column+'_'+str(cut_off)+' [precision, F1, AUC-ROC, AUC-PR, then '
                         +'ranking metrics in a fixed order, see evaluation.py]: '
                         +str(result_list)+'\n')
 
-    # Tidy frame only. The base score has no historical
-    # <dataset>_<metric>_<model>_<direction>_combined.csv matrices to
-    # reproduce -- its published numbers are the .txt log above, which is
-    # written unchanged -- so emitting matrices would create files nothing
-    # reads. The suffix is "_base"; task 2 left this one unallocated
-    # ("Pick a suffix if it ever needs a tidy file") because at the time
-    # this script did not write a tidy file at all.
+    # Tidy frame only. The base score has no
+    # <dataset>_<metric>_<model>_<direction>_combined.csv matrices behind it
+    # -- its numbers are the .txt log above -- so emitting matrices would
+    # create files nothing reads.
     write_metrics(records, dataset, str_directed, suffix="_base",
                   results_dir=RESULTS_DIR, write_matrices=False)
 
@@ -417,26 +394,23 @@ def plot_lift_synthetic(laundering_combined, columns, str_directed, str_supervis
 
 
 def distribution_scores_synthetic(dataset, results_df, str_directed, str_supervised):
-    """Base-score metrics on one synthetic dataset. Deliberately un-folded.
+    """Base-score metrics on one synthetic dataset, un-folded.
 
-    Task 7 scopes cross-validation to the IBM data: the 66 synthetic
-    datasets keep the single split, their variance already comes from the
-    66-dataset spread that feeds the Friedman/Nemenyi analysis (task 8),
-    and folding them would force a decision about how fold-level results
-    enter the CD diagrams. So there is no partition to read here and this
-    function is unchanged -- same full-population evaluation, same
-    4-element lists, same files.
+    Cross-validation is scoped to the IBM data: the 66 synthetic datasets
+    keep the single split, and their variance comes from the 66-dataset
+    spread that feeds the Friedman/Nemenyi analysis. There is no partition
+    to read here, so the evaluation is over the full population.
 
-    That list length is load-bearing and must stay 4 (see the comment on
-    the ``results[column]`` assignment below). The smallest datasets are
-    100 nodes, well under the smallest alert size, which the shared
-    ``ranking_metrics`` already handles by clamping K to the population;
-    those extra metrics are simply not carried in this return value.
+    The returned list length is load-bearing and must stay 4 (see the
+    comment on the ``results[column]`` assignment below). The smallest
+    datasets are 100 nodes, well under the smallest alert size, which the
+    shared ``ranking_metrics`` handles by clamping K to the population;
+    those metrics are not carried in this return value.
     """
     columns = ['laundering', 'separate', 'new_mules', 'existing_mules']
     label_data = pd.read_csv("data/label_data_"+dataset+".csv")
     laundering_combined = results_df.merge(label_data, left_index=True, right_index=True, how="outer")
-    laundering_combined.fillna(-1, inplace=True) # Nodes without connections: not smurfing according to us
+    laundering_combined.fillna(-1, inplace=True) # Nodes without connections are not smurfing
 
     plot_distribution_synthetic(laundering_combined, columns, str_directed, str_supervised)
 
@@ -458,10 +432,9 @@ def distribution_scores_synthetic(dataset, results_df, str_directed, str_supervi
             precision = f1 = auc_roc = auc_pr = -1
 
         # Length fixed at exactly 4: notebooks/VisualisationResults.ipynb's
-        # gargaml_results() unpacks this list as `precision, f1_score, ROC, PR =
-        # tuple(...)` -- a 5th element (e.g. the new ranking metrics) would raise
-        # there on every line and silently zero out the whole row. Unlike
-        # distribution_scores_IBM's log, this one has no slot to add them to.
+        # gargaml_results() unpacks this list as `precision, f1_score, ROC,
+        # PR = tuple(...)`, so a 5th element would raise there on every line
+        # and silently zero out the whole row.
         results[column] = [precision, f1, auc_roc, auc_pr]
         print("Precision: ", precision)
         print("F1: ", f1)
@@ -488,7 +461,7 @@ def general_calculation(dataset, directed, supervised, score_type):
     if dataset in ["HI-Small", "LI-Large"]:
         distribution_scores_IBM(dataset, results_df, str_directed, str_supervised)
 
-    elif dataset[:min(9, len(dataset))] == "synthetic": #use min in case string would be shorter than 9. We don't want an error here
+    elif dataset[:min(9, len(dataset))] == "synthetic": #use min in case the string is shorter than 9
         return distribution_scores_synthetic(dataset, results_df, str_directed, str_supervised)
 
     else:

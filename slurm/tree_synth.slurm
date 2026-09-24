@@ -10,28 +10,17 @@
 #            slurm/submit.sh slurm/tree_synth.slurm 5      # ..._5.py  (5 injected patterns)
 # ARRAY    None -- each script loops the whole grid internally and the fits are
 #          seconds apiece. The expensive part of the synthetic work is stage 1,
-#          which IS an array job.
-# PREREQ   The synthetic stage-1 measures. READ THE WARNING BELOW FIRST.
-# RESUMES  NO.
+#          which is an array job.
+# PREREQ   The synthetic stage-1 measures, in the directory this job reads:
+#          <dir>/<dataset>_GARGAML_directed.csv and
+#          <dir>/<dataset>_GARGAML_undirected_parallel.csv, where <dir> is
+#          $GARGAML_RESULTS_DIR -- the same directory the measure jobs wrote to.
+#          A bare `python scripts/...` run defaults to results/ instead.
+# RESUMES  No.
 # CPUS     4 -- serial sklearn fits, cores for the pandas passes.
-# MEM      32g -- 66 datasets are read one at a time, and the largest is a
+# MEM      32g -- the 66 datasets are read one at a time, and the largest is a
 #          100,000-node measure frame (~18 columns), not a transaction file.
 # TIME     02:00:00 -- 66 datasets x a handful of cheap fits each.
-#
-# PATHS -- stage 1 and stage 2 now share GARGAML_RESULTS_DIR, which fixes the
-#          mismatch this warning used to describe: these three scripts read
-#          <dir>/<dataset>_GARGAML_directed.csv and
-#          <dir>/<dataset>_GARGAML_undirected_parallel.csv (the "_parallel"
-#          suffix the undirected synthetic stage-1 job actually writes -- both
-#          bugs are fixed together in scripts/gargaml_tree_synthetic{,_3,_5}.py),
-#          from the SAME <dir> the measure jobs wrote to. Under Slurm that is
-#          results-revision/ by default (see the export below); a bare
-#          `python scripts/...` run still defaults to results/. To reproduce
-#          the old pre-c5fba86 archived numbers instead, submit with
-#          GARGAML_RESULTS_DIR=results-0 explicitly.
-#          Populating results-revision/ with fresh synthetic stage-1 measures
-#          is still a separate, not-yet-run step -- this job does not do that
-#          itself, it only reads whatever is already there.
 
 #SBATCH --job-name=gargaml_tree_synth
 #SBATCH --output=gargaml_tree_synth.out

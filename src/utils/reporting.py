@@ -1,21 +1,17 @@
 """
-Tidy metrics -> reviewer-facing tables.
+Tidy metrics -> the tables the manuscript reports.
 
-Four of the five headline revision asks already write their numbers to
-``results/<dataset>_<direction><suffix>_metrics.csv`` and stop there:
-GraphSAGE (task 1 / P1), the ranking metrics (task 2 / P2), the feature-group
-ablations (task 3 / P3) and the fold spread (task 7 / P7). No notebook reads
-those files, so none of it reaches a table. This module is the missing step.
+The models write their numbers to
+``results/<dataset>_<direction><suffix>_metrics.csv``; this module assembles
+those rows into the results, ablation, alert-queue, sweep, cost and variance
+tables, as LaTeX and as CSV.
 
 Why here and not in ``VisualisationResults.ipynb``
 --------------------------------------------------
 That notebook builds exact filenames for eight hard-coded models and the four
-legacy metrics, and parses the base scores out of a free-text log with
-``eval()``. Adding four models, four feature configs, a ``fold`` column and
-twenty ranking metrics to it would mean rewriting it, on top of the 2.2 MB of
-stored output it carries. The tidy CSV already has every column those tables
-need, so the tables are assembled from it in code that can be tested, and the
-notebook keeps doing what it does today.
+per-metric matrices, and parses the base scores out of a free-text log with
+``eval()``. The tidy CSV already carries every column these tables need, so
+they are assembled from it in code that can be tested.
 
 The one thing to know about the schema
 --------------------------------------
@@ -23,7 +19,7 @@ The one thing to know about the schema
 wrong in a way that is hard to see:
 
 * ``fold >= 0`` -- one cross-validation fold. Mean and std over these is the
-  variance estimate R2-M6 asks for.
+  variance estimate.
 * ``fold == -1`` -- the pooled out-of-fold pass: every account scored by a
   model that never trained on it. This is the **only** correct population for
   the alert-queue metrics, because P@1000 against a 20 % test slice is a
@@ -37,12 +33,11 @@ averages across them.
 
 Gaps are reported, not hidden
 -----------------------------
-The same rule the rest of the pipeline follows. A cell whose models could not
-be fitted carries ``status`` starting with ``"skipped:"`` and a NaN value;
-:func:`format_cell` renders those as ``--`` rather than dropping the row, and
-a mean over fewer folds than expected is marked so a reader cannot mistake it
-for a complete one. :func:`coverage` reports what is on disk before any table
-is built, which matters while the re-runs are still outstanding.
+A cell whose models could not be fitted carries ``status`` starting with
+``"skipped:"`` and a NaN value; :func:`format_cell` renders those as ``--``
+rather than dropping the row, and a mean over fewer folds than expected is
+marked so a reader cannot mistake it for a complete one. :func:`coverage`
+reports what is on disk before any table is built.
 """
 
 from __future__ import annotations
@@ -67,14 +62,11 @@ from src.utils.naming import MODEL_ORDER, pretty_config
 TIDY_PATTERN = re.compile(r"^(?P<dataset>.+)_(?P<direction>undirected|directed)"
                           r"(?P<suffix>.*)_metrics\.csv$")
 
-# scripts/partial_observability.py writes one tidy file per view that pools
-# *both* directions -- it carries its own `direction` COLUMN instead of a
-# filename token, since one file covers the full-graph and bank-view regimes
-# for both directions at once. A direction-less name has no token to anchor
-# the split the way TIDY_PATTERN's does, and the dataset itself can still
-# contain underscores ("HI-Small_bank012"), so the suffix is matched against
-# a known whitelist instead of guessed by position. Extend the whitelist if
-# another direction-less writer is added.
+# scripts/partial_observability.py writes one tidy file per view covering both
+# directions, so it carries a `direction` COLUMN instead of a filename token.
+# A direction-less name has no token to anchor the split the way TIDY_PATTERN's
+# does, and the dataset can itself contain underscores ("HI-Small_bank012"), so
+# the suffix is matched against this list rather than guessed by position.
 NO_DIRECTION_SUFFIXES = ("partial_observability",)
 NO_DIRECTION_PATTERN = re.compile(
     r"^(?P<dataset>.+)(?P<suffix>_(?:" + "|".join(NO_DIRECTION_SUFFIXES) + r"))"
@@ -84,14 +76,14 @@ NO_DIRECTION_PATTERN = re.compile(
 # number. Their rows carry a K; every other metric's K is NaN.
 AT_K_METRICS = ["P@K", "R@K", "lift@K", "TP@K", "ties@K"]
 
-# GraphSAGE writes these as metric rows too (task 1's timing instrumentation).
-# They are costs, not scores, so a table of them is never bolded by maximum.
+# GraphSAGE's timing instrumentation writes these as metric rows too. They are
+# costs, not scores, so a table of them is never bolded by maximum.
 COST_METRICS = ["fit_seconds", "infer_seconds", "peak_host_mb", "peak_gpu_mb",
                 "epochs_run", "epochs_to_best"]
 
-# Tables 10-11's slice of the grid. HEADLINE_CUTOFFS comes from
-# src/utils/evaluation.py so the reported slice and the sweep the expensive
-# runs actually execute cannot drift apart; it is 0.0 / 0.1 / 0.5 / 0.9.
+# Tables 10-11's slice of the grid; the cut-off half is HEADLINE_CUTOFFS from
+# src/utils/evaluation.py, so the reported slice and the sweep the expensive
+# runs execute cannot drift apart.
 HEADLINE_TARGETS = ["Is Laundering", "GATHER-SCATTER", "SCATTER-GATHER"]
 
 
@@ -122,9 +114,9 @@ def _parse_name(filename):
 def metric_files(results_dir="results", datasets=None, exclude_suffixes=("_diagnosis",)):
     """Every tidy metrics file on disk, as ``(path, dataset, direction, suffix)``.
 
-    ``exclude_suffixes`` drops files that are not model results. The task-6
-    diagnosis writes into the same tidy schema on purpose -- it reuses the
-    shared metrics -- but its rows are score *variants* of one model, not
+    ``exclude_suffixes`` drops files that are not model results. The directed
+    diagnosis writes into the same tidy schema, since it reuses the shared
+    metrics, but its rows are score *variants* of one model rather than
     models, so they would appear as extra rows in every results table.
     """
     found = []
@@ -181,10 +173,9 @@ def model_rows(df):
 def coverage(df):
     """What is on disk, per (dataset, direction, model, features).
 
-    Worth printing before any table while the re-runs are outstanding: it is
-    how you tell "this model scores badly" from "this model has not been run
-    since the metric changed". ``folds`` of ``single`` means the rows predate
-    task 7's cross-validation.
+    Separates "this model scores badly" from "this model has no rows here".
+    ``folds`` of ``single`` means the rows come from a single-split run
+    rather than from cross-validation.
     """
     if df.empty:
         return df
@@ -222,7 +213,7 @@ def summarise(df, fold_mode="auto", group_keys=GROUP_KEYS):
     are never mixed:
 
     ``"per_fold"``
-        ``fold >= 0`` only -- mean +/- std across folds (R2-M6's variance).
+        ``fold >= 0`` only -- mean +/- std across folds.
     ``"pooled"``
         ``fold == -1`` only -- the pooled out-of-fold pass. ``std`` is NaN;
         there is one value by construction.
@@ -230,15 +221,15 @@ def summarise(df, fold_mode="auto", group_keys=GROUP_KEYS):
         ``fold`` NaN only -- a single-split or full-population run.
     ``"auto"``
         per-fold where a cell has folds, single where it does not. This is
-        what a table spanning both CV and pre-CV results wants, and the
-        ``n_folds_ok`` column is what tells the two apart afterwards.
+        what a table spanning both cross-validated and single-split results
+        wants, and ``n_folds_ok`` tells the two apart afterwards.
     ``"pooled_first"``
         pooled where a cell has a pooled pass, single where it does not.
         What the alert-queue table wants: taking ``"pooled"`` alone would
-        **drop** every model that has not been re-run under CV, so a table
-        meant to compare models would quietly show only the ones that had.
-        The populations then differ between rows, which is why
-        :func:`alert_table` prints ``n_test`` beside the numbers.
+        **drop** every model without a pooled pass, so a table meant to
+        compare models would show only some of them. The populations can
+        then differ between rows, which is why :func:`alert_table` prints
+        ``n_test`` beside the numbers.
 
     ``n_folds_ok`` counts folds whose ``status`` is ``"ok"``, not folds
     present, so a mean over 3 of 5 folds announces itself.
@@ -259,8 +250,8 @@ def summarise(df, fold_mode="auto", group_keys=GROUP_KEYS):
     elif fold_mode in ("auto", "pooled_first"):
         # One kind wins wherever it exists; ``single`` fills the rest. The
         # anti-join is on the cell keys rather than on whole rows, so a
-        # dataset that is only half re-run keeps both halves instead of
-        # silently losing the models that have not been folded yet.
+        # dataset holding both kinds keeps both instead of losing the models
+        # that have no folds.
         preferred = per_fold if fold_mode == "auto" else pooled
         cells = preferred[group_keys].drop_duplicates()
         merged = single.merge(cells.assign(_covered=1), on=group_keys, how="left")
@@ -305,12 +296,11 @@ def summarise(df, fold_mode="auto", group_keys=GROUP_KEYS):
 def with_direction_free(df, direction):
     """Rows for ``direction``, plus every direction-free config's rows.
 
-    ``topology`` (task 3) is computed on the undirected reduced graph in both
-    passes, so ``gargaml_tree.py`` runs it **once** and stores it under
-    whichever direction ran first. A directed table that filtered on
-    ``direction == "directed"`` would therefore be missing the degree-only
-    ablation entirely, and would look like the run had failed rather than
-    like the config being shared. Pull it in from wherever it landed.
+    ``topology`` is computed on the undirected reduced graph in both passes,
+    so ``gargaml_tree.py`` runs it **once** and stores it under whichever
+    direction ran first. Filtering on ``direction == "directed"`` alone would
+    therefore drop the degree-only ablation entirely, which reads like a
+    failed run rather than a shared config.
     """
     if df.empty:
         return df
@@ -335,10 +325,9 @@ def format_cell(mean, std=np.nan, n_folds_ok=None, n_folds=None, scale=1.0,
       ``+/- nan``;
     * a mean over fewer folds than expected gets a trailing ``*`` and the
       count, because ``0.31 +/- 0.02`` over 3 of 5 folds is not the same
-      claim as over 5. Only a per-fold ``basis`` can be marked this way --
-      a single-split or pooled cell has one value by construction, and
-      marking it "1/5" would report four folds as missing that were never
-      expected.
+      claim as over 5. Only a per-fold ``basis`` is marked this way: a
+      single-split or pooled cell has one value by construction, and marking
+      it "1/5" would report four folds as missing that were never expected.
     """
     if mean is None or (isinstance(mean, float) and np.isnan(mean)):
         return "--"
@@ -384,7 +373,7 @@ def _pivot(summary, index, columns, n_folds=None, scale=1.0, digits=3,
 
 
 def model_label(model, features):
-    """Display name for a (model, feature config) pair -- task 12's map."""
+    """Display name for a (model, feature config) pair."""
     return pretty_config(model, features)
 
 
@@ -398,11 +387,11 @@ def _model_sort_key(model):
 
 def ablation_table(df, dataset, direction, metric="AUC_PR", n_folds=None,
                    latex=True):
-    """P3 / R2-M5: the four feature configs side by side.
+    """The four feature configs side by side.
 
     Rows are (cut-off, pattern), columns the configs. ``topology`` carries no
-    GARG-AML signal at all, so the question this answers is how much of the
-    lift is the block layout and how much is plain degree.
+    GARG-AML signal at all, so the table separates how much of the lift is
+    the block layout from how much is plain degree.
     """
     sub = with_direction_free(model_rows(df), direction)
     sub = sub[(sub["dataset"] == dataset) & (sub["metric"] == metric)
@@ -419,12 +408,12 @@ def ablation_table(df, dataset, direction, metric="AUC_PR", n_folds=None,
 
 def results_table(df, dataset, metric="AUC_PR", cutoffs=None, targets=None,
                   n_folds=None, scale=100.0, digits=1, latex=True):
-    """P1: Tables 10-11, with every model that has rows -- GraphSAGE included.
+    """Tables 10-11: every model that has rows, GraphSAGE included.
 
     Restricted to the headline cut-offs and patterns by default, and scaled by
-    100 to match the published tables. Every model appears under its
-    :mod:`src.utils.naming` label, so a GraphSAGE feature config and a task-3
-    ablation cannot collide in the same column.
+    100 to match the tables in the paper. Every model appears under its
+    :mod:`src.utils.naming` label, so a GraphSAGE feature config and a
+    feature-group ablation cannot collide in the same column.
     """
     cutoffs = HEADLINE_CUTOFFS if cutoffs is None else cutoffs
     targets = HEADLINE_TARGETS if targets is None else targets
@@ -446,7 +435,7 @@ def results_table(df, dataset, metric="AUC_PR", cutoffs=None, targets=None,
 
 def alert_table(df, dataset, cutoff, target, metric="P@K", alert_sizes=None,
                 n_folds=None, latex=True, prefer_pooled=True):
-    """P2 / R1-5 / R2-M4: the alert-queue table.
+    """The alert-queue table.
 
     One row per model, one column per queue size. Built from the **pooled
     out-of-fold** rows where they exist: the folds are disjoint, so pooling
@@ -455,9 +444,9 @@ def alert_table(df, dataset, cutoff, target, metric="P@K", alert_sizes=None,
     Without that, P@1000 is a rescaled proxy for an investigator's workload
     rather than the thing itself.
 
-    Always read beside :func:`ties_table`. A decision tree emits few distinct
+    The companion to :func:`ties_table`. A decision tree emits few distinct
     scores, so the top-K set can be decided by sort order inside a tied
-    plateau; ``ties@K`` is how you see when that has happened.
+    plateau, and ``ties@K`` is where that shows.
     """
     alert_sizes = ALERT_SIZES if alert_sizes is None else alert_sizes
 
@@ -481,11 +470,10 @@ def alert_table(df, dataset, cutoff, target, metric="P@K", alert_sizes=None,
                    digits=digits, bold_max=(metric != "ties@K"), latex=latex)
     table.columns = [f"K={int(k)}" for k in table.columns]
 
-    # Rows can come from different populations while the re-runs are only
-    # partly done: a model with a pooled out-of-fold pass is ranked over every
-    # account, one still on the old single split over its 30 % test slice.
-    # That is a real difference in what P@K means, so it is printed rather
-    # than left for the reader to assume away.
+    # Rows can come from different populations: a model with a pooled
+    # out-of-fold pass is ranked over every account, a single-split one over
+    # its 30 % test slice. That is a real difference in what P@K means, so
+    # the population is printed rather than left to be assumed away.
     population = summary.groupby("variant")["n_test"].max()
     table.insert(0, "ranked over", population.reindex(table.index)
                  .map(lambda n: "--" if pd.isna(n) else f"{int(n):,}"))
@@ -498,14 +486,13 @@ def ties_table(df, dataset, cutoff, target, **kwargs):
 
 
 def cost_table(df, dataset, metrics=None, n_folds=None, latex=True):
-    """P1's scalability half: fit / inference time and peak memory.
+    """The scalability half: fit / inference time and peak memory.
 
-    Only models that record costs appear -- today that is GraphSAGE, whose
-    rows carry them from task 1's instrumentation. GARG-AML's preprocessing
-    and scoring times are written by the measure scripts to
+    Only models that record costs appear, which is GraphSAGE. GARG-AML's
+    pre-processing and scoring times are written by the measure scripts to
     ``results/time_results_*.txt`` in a different format and are not joined
-    here; the point of reporting fit time separately is that GARG-AML's is
-    zero, which a combined wall-clock number would hide.
+    here; fit time is reported separately because GARG-AML's is zero, which
+    a combined wall-clock number would hide.
     """
     metrics = COST_METRICS if metrics is None else metrics
 
@@ -521,17 +508,16 @@ def cost_table(df, dataset, metrics=None, n_folds=None, latex=True):
 
 
 def louvain_setting(df):
-    """Split ``dataset`` into its base name and its Louvain setting (task 4).
+    """Split ``dataset`` into its base name and its Louvain setting.
 
-    The sweep encodes the setting in the dataset string
-    (``HI-Small_res20``, ``HI-Small_nolouvain``), so every arm arrives here
-    as a separate "dataset". Adding ``base_dataset`` and ``resolution``
-    columns is what lets a table put the setting on an axis instead of
-    scattering it across five unrelated tables.
+    The sweep encodes the setting in the dataset string (``HI-Small_res20``,
+    ``HI-Small_nolouvain``), so every arm arrives here as a separate
+    "dataset". The ``base_dataset`` and ``resolution`` columns are what let a
+    table put the setting on an axis instead of scattering it across several.
 
-    ``resolution`` is the string ``"off"`` for the no-Louvain arm rather
-    than NaN: it is a real setting that produced real numbers, and a NaN
-    would be dropped by the pivot and silently vanish from the comparison.
+    ``resolution`` is the string ``"off"`` for the no-Louvain arm rather than
+    NaN: it is a real setting that produced real numbers, and a NaN would be
+    dropped by the pivot and vanish from the comparison.
     """
     if df.empty:
         return df.assign(base_dataset=[], resolution=[])
@@ -545,10 +531,9 @@ def louvain_setting(df):
 def _resolution_order(values):
     """Sweep columns in order of how much they reduce the graph.
 
-    ``off`` first (nothing removed), then ascending resolution, because
-    that is the axis the reader is actually following: higher resolution
-    means smaller communities and more inter-community edges discarded.
-    Sorting these as strings would put ``"10"`` before ``"5"``.
+    ``off`` first (nothing removed), then ascending resolution, since higher
+    resolution means smaller communities and more inter-community edges
+    discarded. Sorting these as strings would put ``"10"`` before ``"5"``.
     """
     numeric = sorted(v for v in values if v != "off")
     return (["off"] if "off" in set(values) else []) + numeric
@@ -556,17 +541,17 @@ def _resolution_order(values):
 
 def sweep_table(df, dataset, direction, metric="AUC_PR", features="full",
                 cutoffs=None, targets=None, n_folds=None, latex=True):
-    """P4 / R2-M3: downstream performance against the Louvain setting.
+    """Downstream performance against the Louvain setting.
 
     Rows are (model, pattern, cut-off); columns are the resolution, with the
     no-Louvain arm first. ``dataset`` is the **base** name (``HI-Small``),
     not one arm of the sweep -- every arm is gathered by
     :func:`louvain_setting`.
 
-    Restricted to the published feature configuration by default: the
-    question here is whether the *pre-processing* choice moves the result,
-    so varying the feature groups at the same time would confound the two
-    sensitivities the revision reports separately.
+    Restricted to the ``full`` feature configuration by default: the question
+    here is whether the *pre-processing* choice moves the result, so varying
+    the feature groups at the same time would confound two sensitivities that
+    are reported separately.
     """
     cutoffs = HEADLINE_CUTOFFS if cutoffs is None else cutoffs
     targets = HEADLINE_TARGETS if targets is None else targets
@@ -598,12 +583,12 @@ def sweep_table(df, dataset, direction, metric="AUC_PR", features="full",
 
 
 def severance_table(results_dir="results", latex=True):
-    """P4 / R2-M3: the percentage of edges the pre-processing discards.
+    """The percentage of edges the pre-processing discards.
 
-    Reads ``results/louvain_severance.csv``, which the measure scripts
-    append to on every run. That file is an append-only log, so a dataset
-    re-run at the same setting appears twice; the last row wins, being the
-    one that produced the measures currently on disk.
+    Reads ``results/louvain_severance.csv``, which the measure scripts append
+    to on every run. That file is an append-only log, so a dataset run twice
+    at the same setting appears twice; the last row wins, being the one that
+    produced the measures on disk.
     """
     path = os.path.join(results_dir, "louvain_severance.csv")
     if not os.path.exists(path):
@@ -651,11 +636,9 @@ SPLITTING_COLUMNS = {
 
 def pattern_splitting_table(results_dir="results", column="pct_destroyed",
                             latex=True):
-    """P4 / R2-M3: what the Louvain step destroys, by pattern type.
+    """What the Louvain step destroys, by pattern type.
 
-    Rows are (dataset, pattern type), columns the resolution, so the
-    reviewer's claim -- "a pattern straddling two communities is destroyed"
-    -- can be read straight off. Built from
+    Rows are (dataset, pattern type), columns the resolution. Built from
     ``results/pattern_splitting_summary.csv``, which
     ``scripts/pattern_splitting.py`` writes.
 
@@ -665,10 +648,9 @@ def pattern_splitting_table(results_dir="results", column="pct_destroyed",
     structure to lose, and those cells render as ``--`` rather than as a
     zero that would read like "nothing was destroyed".
 
-    Read it beside :func:`severance_table`. Edges severed says what the
-    pre-processing costs; this says what it costs *us*, and the two do not
-    move together -- the pooled destruction rate is nearly flat in the
-    resolution while the per-pattern rates move in opposite directions.
+    The companion to :func:`severance_table`: edges severed is what the
+    pre-processing costs the graph, this is what it costs detection, and the
+    two do not move together.
     """
     if column not in SPLITTING_COLUMNS:
         raise KeyError(f"Unknown splitting column {column!r}; expected one of "
@@ -708,11 +690,11 @@ def pattern_splitting_table(results_dir="results", column="pct_destroyed",
 
 
 def variance_table(df, dataset, metric="AUC_PR", n_folds=None, latex=True):
-    """P7 / R2-M6: the fold spread, and how many folds each mean rests on.
+    """The fold spread, and how many folds each mean rests on.
 
     The companion to every other table here: a mean is only interpretable
-    beside its spread, and a spread is only interpretable beside the number
-    of folds that produced it.
+    beside its spread, and a spread only beside the number of folds that
+    produced it.
     """
     sub = df[(df["dataset"] == dataset) & (df["metric"] == metric)]
     summary = summarise(sub, fold_mode="per_fold")
@@ -729,25 +711,23 @@ def variance_table(df, dataset, metric="AUC_PR", n_folds=None, latex=True):
 # Output
 # ---------------------------------------------------------------------------
 
-# Beyond this many columns a table will not fit \textwidth, so it is
-# promoted to a full-width float and shrunk -- the same treatment the
-# manuscript's own results tables already get. The ablation and results
-# tables carry one column per (model, feature config) and cross this easily.
+# Beyond this many columns a table will not fit \textwidth, so it is promoted
+# to a full-width float and shrunk. The ablation and results tables carry one
+# column per (model, feature config) and cross this easily.
 WIDE_COLUMNS = 6
 
 
 def to_latex(table, caption, label, column_format=None, note=None, wide=None):
-    """A booktabs table, in the style the manuscript already uses.
+    """A booktabs table, in the style the manuscript uses.
 
     ``note`` is appended as a ``\\footnotesize`` line under the table --
     the place to say which population K was ranked over, or that a starred
     cell rests on fewer folds than the others.
 
     ``wide`` promotes the float to ``table*`` and shrinks the font. Left at
-    ``None`` it is decided by the column count (:data:`WIDE_COLUMNS`): these
-    tables grow a column per model *and* feature config, so the ablation and
-    results tables are wide as a matter of course rather than by accident,
-    and a table that silently overflows the text block is not usable output.
+    ``None`` it is decided by the column count (:data:`WIDE_COLUMNS`), since
+    these tables grow a column per model *and* feature config and a table
+    that overflows the text block is not usable output.
     """
     if table.empty:
         return f"% {label}: no rows on disk yet\n"

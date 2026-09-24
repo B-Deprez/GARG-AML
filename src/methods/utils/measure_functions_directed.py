@@ -19,7 +19,7 @@ def measure_01_function(adj_full, size_0, size_1):
     if total_size_01 > 0:
         rel_01 = total_sum_01/total_size_01
     else:
-        rel_01 = 1 #Since block only contains sure connections => full sum
+        rel_01 = 1 #Empty block: every entry it could hold exists by construction
 
     return rel_01, total_size_01
 
@@ -69,9 +69,9 @@ def measure_12_function(adj_full, size_0, size_1, size_2):
     if total_size_12 > 0:
         rel_12 = total_sum_12/total_size_12
     elif size_2 > 0:
-        rel_12 = 1 #Since block only contains sure connections => full sum
+        rel_12 = 1 #Empty block: every entry it could hold exists by construction
     else:
-        rel_12 = 0 #No connections at all
+        rel_12 = 0 #No level-2 neighbours, so no connections at all
 
     return rel_12, total_size_12
 

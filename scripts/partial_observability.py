@@ -1,12 +1,12 @@
 """
-Partial-observability experiment (task 5) -- the appendix run.
+Partial observability: GARG-AML under a single-institution view.
 
-Reviewers R1-1/R1-2: a bank sees only the transactions with one of its own
-customers on them, so the second-order neighbourhood GARG-AML is computed
-from may not be observable to it. This script measures what that costs, on
-the **pure GARG-AML score** rather than on the tree/boosting extensions:
-the score needs no training, so it survives the small positive counts a
-single institution has, where the supervised grid does not.
+A bank sees only the transactions with one of its own customers on them, so
+the second-order neighbourhood GARG-AML is computed from may not be
+observable to it. This script measures what that costs, on the pure
+GARG-AML score rather than on the tree/boosting extensions: the score needs
+no training, so it survives the small positive counts a single institution
+has, where the supervised grid does not.
 
 The comparison
 --------------
@@ -18,43 +18,39 @@ For every client of the institution, the score is computed twice:
            booked at the institution on either side
 =========  ==================================================================
 
-**No Louvain on either side.** The published pipeline severs inter-community
-edges first, but full and view would then be reduced by *different*
-partitions, and the degradation could not be attributed to missing edges
-rather than to a changed partition. The consequence is that the ``full``
-column here is **not** the published Tables 10-11 number -- it is a baseline
-computed for this comparison, and must be labelled as such in the paper.
+The Louvain reduction is switched off on both sides. With it on, full and
+view would be reduced by different partitions, and the degradation could not
+be attributed to the missing edges rather than to a changed partition. The
+``full`` column here is therefore not the same quantity as the main results
+tables; it is a baseline computed for this comparison.
 
-**Only the institution's clients are scored**, on both sides -- never all
-515,080 accounts. That is the population a bank alerts on, and it keeps the
-run to minutes: the no-Louvain second-order neighbourhoods are large (up to
-~14,900 accounts, a 1.8 GB dense adjacency) and there is no reason to pay
-for accounts nobody asked about.
+Only the institution's clients are scored, on both sides. That is the
+population a bank alerts on, and it keeps the run short: the no-Louvain
+second-order neighbourhoods are large.
 
 Why the comparison is paired
 ----------------------------
-A bank sees *every* transaction of its own clients, so each client's first-
-order neighbourhood is identical under both regimes -- degree is preserved
-exactly, and only N2 degrades. The same accounts, the same labels and the
-same degree subgroups therefore appear on both sides, and the only thing
-that varies is what the score could see. ``degree_differs`` in the output
-counts the exceptions, which can only be accounts held at two banks (8 of
-515,080 in HI-Small).
+A bank sees every transaction of its own clients, so each client's
+first-order neighbourhood is identical under both regimes -- degree is
+preserved exactly, and only N2 degrades. The same accounts, the same labels
+and the same degree subgroups therefore appear on both sides, and the only
+thing that varies is what the score could see. ``degree_differs`` in the
+output counts the exceptions, which can only be accounts held at two banks.
 
 Ties
 ----
-The score is heavily tied on a single institution's clients (522 of bank
-012's 2,639 share exactly 1.0), so "the top 50" is not uniquely defined and
-a top-K overlap between the two regimes is not interpretable on its own.
-Every ranking metric is therefore written with its ``ties@K`` beside it, and
-the metrics are additionally reported on the ``degree >= MIN_DEGREE``
-subgroup, where the block structure is not degenerate.
+The score is heavily tied on a single institution's clients, so "the top 50"
+is not uniquely defined and a top-K overlap between the two regimes is not
+interpretable on its own. Every ranking metric is therefore written with its
+``ties@K`` beside it, and the metrics are additionally reported on the
+``degree >= MIN_DEGREE`` subgroup, where the block structure is not
+degenerate.
 
 Outputs
 -------
   * ``results/<view>_partial_observability_accounts.csv`` -- one row per
     (account, direction): both scores, degree, N1/N2 under both regimes and
-    the label propensities. This is what the notebook plots.
+    the label propensities.
   * ``results/<view>_partial_observability_metrics.csv`` -- tidy metrics,
     one row per (direction, regime, cut-off, target, subgroup, metric, K).
 """
@@ -92,27 +88,25 @@ DATASET = "HI-Small"
 
 # Each entry is a bank identifier, or a "top<k>" group standing for the k
 # banks with the most clients (see src/data/bank_views.py). The largest
-# single bank in HI-Small holds 0.512% of the accounts and has 16 positive
-# clients at cut-off 0.1; "top50" holds 10.8% and has 379, which is what
-# makes the detection comparison say anything. Both are reported.
+# single bank in HI-Small and a pooled group of the fifty largest are both
+# reported: no single bank holds enough positive clients on its own.
 INSTITUTIONS = ["012", "top50"]
 
 DIRECTIONS = [False, True]
 SCORE_TYPE = "weighted_average"
 
-# 0.0 means "involved in at least one laundering transaction", and is now part
-# of the main sweep too (src/utils/evaluation.py::CUT_OFFS). It leads here
-# because a single institution has too few positives at 0.1 and above to carry
-# a claim: bank 012 has 87 clients at 0.0 against 16 at 0.1 and 1 at 0.5. This
-# appendix stays on the two most populated cut-offs rather than the full list.
+# 0.0 means "involved in at least one laundering transaction". A single
+# institution has too few positive clients at the higher cut-offs, so this
+# experiment stays on the two most populated ones rather than the full sweep
+# in src/utils/evaluation.py.
 CUT_OFFS = [0.0, 0.1]
 TARGET_COLUMNS = ["Is Laundering", "GATHER-SCATTER", "SCATTER-GATHER"]
 
-# Below this degree the block structure is degenerate -- an ego graph with
-# one or two neighbours has near-empty blocks, and the score collapses onto
-# a handful of values. Metrics are reported on the whole client base *and*
-# on this subgroup. Degree is preserved by the view, so the subgroup is the
-# same set under both regimes.
+# Below this degree the block structure is degenerate: an ego graph with one
+# or two neighbours has near-empty blocks, and the score collapses onto a
+# handful of values. Metrics are reported on the whole client base and on
+# this subgroup. Degree is preserved by the view, so the subgroup is the same
+# set under both regimes.
 MIN_DEGREE = 3
 
 # Includes sizes below the module default [50, 100, 500, 1000]: a single
@@ -173,9 +167,9 @@ def process_node_directed(node):
 def measure_clients(G, clients, directed):
     """Block measures for ``clients`` only, on ``G`` exactly as given.
 
-    ``G`` is *not* Louvain-reduced here -- see the module docstring. Only
-    the requested nodes are measured, which is what keeps this affordable
-    on the un-severed graph.
+    ``G`` is not Louvain-reduced here -- see the module docstring. Only the
+    requested nodes are measured, which is what keeps this affordable on the
+    un-severed graph.
     """
     if directed:
         initargs = (G, G.to_undirected(), G.reverse(copy=True))

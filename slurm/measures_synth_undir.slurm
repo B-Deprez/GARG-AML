@@ -4,36 +4,32 @@
 # WHAT     One synthetic dataset per array task: builds the graph from
 #          data/edge_data_<name>.csv, Louvain-reduces it at the default
 #          resolution 10, computes the three undirected block measures per node.
-#          Writes results/<dataset>_GARGAML_undirected_parallel.csv -- NOTE the
-#          "_parallel" suffix, which is what the script writes today and is NOT
-#          what scripts/gargaml_tree_synthetic*.py reads. See slurm/README.md,
-#          "Known gap: synthetic stage 1 -> stage 2".
-# SUBMIT   Submit the size tiers SEPARATELY -- their costs differ by four orders
-#          of magnitude and a single --array=0-65 queues the cheap 44 behind the
-#          expensive 22:
+#          Writes
+#          $GARGAML_RESULTS_DIR/<dataset>_GARGAML_undirected_parallel.csv -- the
+#          "_parallel" suffix is the name scripts/gargaml_tree_synthetic*.py
+#          read back.
+# SUBMIT   Submit the size tiers separately -- their costs differ by four orders
+#          of magnitude, and a single --array=0-65 queues the cheap 44 behind
+#          the expensive 22:
 #            sbatch --array=0-21  --time=00:30:00 --mem=8g   slurm/measures_synth_undir.slurm
 #            sbatch --array=22-43 --time=02:00:00 --mem=16g  slurm/measures_synth_undir.slurm
 #            sbatch --array=44-65 --time=24:00:00 --mem=64g  slurm/measures_synth_undir.slurm
-# ARRAY    --array=<i> indexes construct_datasets(), 66 entries. VERIFIED to be a
-#          bijection over 0-65 by dry-running the decoder, with CONTIGUOUS size
-#          tiers: 0-21 = 100 nodes, 22-43 = 10,000, 44-65 = 100,000.
-#          This array is the single biggest win in the harness: a ~9-day serial
-#          loop becomes roughly the wall time of its slowest dataset.
-# PREREQ   data/edge_data_<name>.csv for each name (all 66 present locally).
-# RESUMES  YES, at dataset granularity -- see measures_ibm_dir.slurm. Because one
-#          task is one dataset here, a killed task costs only that dataset.
+# ARRAY    --array=<i> indexes construct_datasets(), 66 entries, with contiguous
+#          size tiers: 0-21 = 100 nodes, 22-43 = 10,000, 44-65 = 100,000.
+#          Running them as an array turns a multi-day serial loop into roughly
+#          the wall time of the slowest dataset.
+# PREREQ   data/edge_data_<name>.csv for each of the 66 names.
+# RESUMES  Yes, at dataset granularity -- see measures_ibm_dir.slurm. One task is
+#          one dataset here, so a killed task costs only that dataset.
 # CPUS     8 -> the script's 4-worker pool (min(4, cpu_count()//2)). See
 #          measures_ibm_dir.slurm for why this is not auto-detected.
-# MEM      Defaults to 16g, which suits the 10,000-node tier. Override per tier
-#          as above: 8g is ample at 100 nodes; the 100,000-node tier densifies
-#          larger ego graphs and gets 64g.
-# TIME     Defaults to 06:00:00, correct for the 10,000-node tier (~4 min
-#          median). The 100,000-node tier has a ~9.8 h MEDIAN, so 6 h would kill
-#          over half of it -- give that range --time=24:00:00 explicitly. The
-#          median is what the archived timing logs record; the MAX is what sizes
-#          a wall clock, and the archives cannot be attributed to a run (three
-#          scripts append to the same file), so 24 h is deliberate headroom
-#          rather than a measured bound.
+# MEM      16g by default, which suits the 10,000-node tier. Override per tier as
+#          above: 8g is ample at 100 nodes; the 100,000-node tier leaves larger
+#          ego graphs and gets 64g.
+# TIME     06:00:00 by default, correct for the 10,000-node tier (~4 min median).
+#          The 100,000-node tier has a ~9.8 h median, so six hours would kill
+#          over half of it -- give that range --time=24:00:00 explicitly. 24 h is
+#          headroom over the median, not a measured bound.
 
 #SBATCH --job-name=gargaml_meas_synth_undir
 #SBATCH --output=gargaml_meas_synth_undir_%A_%a.out

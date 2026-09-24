@@ -27,10 +27,7 @@ RESULTS_DIR = resolve_results_dir()
 
 # IsolationForest is unsupervised and never sees labels during fit, so fitting it on
 # every account (rather than a 70/30 split) is not label leakage -- it is standard
-# practice for a density estimator, and keeps this baseline's published numbers
-# unchanged from earlier revisions. Unlike gargaml_tree.py/_blocks.py/_synthetic*.py,
-# this script's own AUC computation already used the continuous anomaly score, not
-# clf.predict() -- it was never one of the five call sites with the known defect.
+# practice for a density estimator.
 IF_MODEL_KEY = "gargaml_if_d"  # directed only; see src/utils/naming.py
 
 def gargaml_IF(dataset = "HI-Small", directed = True):
@@ -149,7 +146,7 @@ def data_preparation(dataset, measure_df):
 
 def IF_AUC(dataset, measure_df, directed=True):
     str_directed = "directed" if directed else "undirected"
-    cut_offs = CUT_OFFS # the canonical sweep, 0.0 included -- see src/utils/evaluation.py
+    cut_offs = CUT_OFFS # one canonical sweep -- see src/utils/evaluation.py
     columns = ['Is Laundering', 'FAN-OUT', 'FAN-IN', 'GATHER-SCATTER', 'SCATTER-GATHER', 'CYCLE', 'RANDOM', 'BIPARTITE', 'STACK']
 
     laundering_combined = data_preparation(dataset, measure_df)
@@ -161,13 +158,11 @@ def IF_AUC(dataset, measure_df, directed=True):
             print(cutoff, target)
 
             # Evaluated on every account, not a 30% slice: fit and score already ran
-            # on the full population above, so this reports what was actually
-            # computed, and keeps this baseline's published numbers unchanged.
+            # on the full population above, so this reports what was computed.
             context = dict(
                 dataset=dataset, direction=str_directed,
-                features="block_densities_only",  # measure_00..measure_22 only, no
-                                                    # sizes -- not literally task 3's
-                                                    # group (b), which also has sizes
+                features="block_densities_only",  # measure_00..measure_22 only,
+                                                    # without the block sizes
                 cutoff=cutoff, target=target, seed=SEED,
             )
             y_true = (laundering_combined[target] > cutoff).astype(int)

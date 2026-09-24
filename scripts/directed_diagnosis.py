@@ -1,55 +1,50 @@
 """
-Directed-vs-undirected diagnosis (task 6) -- the experiment for R2-M2.
+Directed-vs-undirected score diagnosis.
 
-The reviewer asks why the undirected score wins when Section 3.3 motivates
-the directed one from uni-directional flow, and names two hypotheses:
-(a) benign bidirectional edges are over-penalised, (b) the level-assignment
-rule (Eq. 11) is too strict. This script measures both on the synthetic
-grid, where pattern membership is ground truth, and writes one row per node
-plus a tidy metrics frame comparing five score variants on the same
-neighbourhoods.
+Compares five score variants on the same second-order neighbourhoods and
+instruments the level assignment of Eq. 11, on the synthetic grid where
+pattern membership is ground truth. Writes one row per node plus a tidy
+metrics frame.
 
 The mechanics live in ``src/methods/directed_diagnosis.py``; read that
-module's docstring first -- it defines the variants and explains why the
-reciprocal-edge count is exact rather than approximate.
+module's docstring for the definition of each variant.
 
-What to look for in the output
-------------------------------
+Outputs
+-------
 ``<dataset>_directed_diagnosis.csv`` (per node)
-    Level census, reciprocal census and every score variant. The columns
-    that carry the argument are ``d2_reverse_only`` (distance-2 nodes Eq.
-    11 puts at level 2 where §3.3 puts them at level 0), ``d2_neither``
-    (distance-2 nodes Eq. 11 cannot place at all, which it groups with the
-    node itself) and ``reciprocal_penalised``.
+    Level census, reciprocal census and every score variant.
+    ``d2_reverse_only`` counts the distance-2 nodes Eq. 11 places at level
+    2 that are reachable only by a reverse directed 2-path, ``d2_neither``
+    the distance-2 nodes Eq. 11 cannot place at all and groups with the
+    node itself, and ``reciprocal_penalised`` the reciprocal edges the
+    penalty blocks charge for.
 ``<dataset>_directed_diagnosis_summary.csv``
-    The same, averaged within each ground-truth class.
-``<dataset>_undirected_diagnosis_metrics.csv``
+    The same, averaged within each ground-truth class and structural role.
+``<dataset>_directed_diagnosis_metrics.csv``
     AUC-ROC / AUC-PR / ranking metrics for every variant against every
-    ground-truth column, through the shared evaluation module. This is the
-    "does the gap close" table: compare ``gargaml_d`` against
-    ``gargaml_d_flowsplit`` (hypothesis b) and ``gargaml_d_norecip``
-    (hypothesis a), with ``gargaml_u`` as the target to close to.
+    ground-truth column, through the shared evaluation module:
+    ``gargaml_d`` beside ``gargaml_d_flowsplit`` (the relaxed level
+    assignment) and ``gargaml_d_norecip`` (reciprocal edges removed), with
+    ``gargaml_u`` as the reference.
 
 Louvain
 -------
 Off by default. The diagnosis is about the level-assignment rule, and
 running it on the reduced graph would mix Eq. 11's behaviour with the
-edge-removal step's -- the same argument that made
-scripts/partial_observability.py turn Louvain off on both sides. Set
-``LOUVAIN = True`` to see the numbers the published pipeline would produce;
-the ``directed`` column then reproduces ``results/<dataset>_GARGAML_
-directed.csv`` exactly, which :func:`check_parity` verifies on a sample
-either way.
+edge-removal step's -- the same reason scripts/partial_observability.py
+turns Louvain off on both sides. Set ``LOUVAIN = True`` for the numbers the
+main pipeline produces; the ``directed`` column then reproduces
+``results/<dataset>_GARGAML_directed.csv`` exactly, which
+:func:`check_parity` verifies on a sample either way.
 
-Cost
-----
+Sampling
+--------
 Per node this builds three ego graphs and four adjacency matrices, so it is
-several times the cost of one scoring pass. The 22 synthetic datasets at
-n=100 run in seconds; the n=10,000 tier takes minutes per dataset. HI-Small
-is feasible only sampled -- ``SAMPLE_NODES`` caps the node count and the
-sample is seeded, and a sampled run is honest for the level and reciprocal
-censuses but **not** for the ranking metrics, which are written only for a
-complete pass.
+several times the cost of one scoring pass. ``SAMPLE_NODES`` caps the node
+count for a dataset too large to diagnose exhaustively; the sample is
+seeded, and a sampled run is valid for the level and reciprocal censuses
+but not for the ranking metrics, which are written only for a complete
+pass.
 """
 
 import os
@@ -75,7 +70,7 @@ from src.utils.graph_processing import graph_community
 from src.utils.runtime import (env_override, select_datasets, echo_config, as_list,
                               resolve_results_dir)
 
-# See the module docstring: off by default, deliberately.
+# See the module docstring.
 LOUVAIN = False
 
 # Cap for a dataset too large to diagnose exhaustively. None = every node.
@@ -84,17 +79,16 @@ LOUVAIN = False
 # metrics of the dataset.
 SAMPLE_NODES = 20000
 
-# How many nodes to check against the published pipeline before trusting a
-# run's ``directed`` column.
+# How many nodes to check against the main pipeline before trusting a run's
+# ``directed`` column.
 PARITY_SAMPLE = 25
 
 # The ground-truth columns of the synthetic label files.
 SYNTHETIC_LABELS = ["laundering", "separate", "new_mules", "existing_mules"]
 
-# Model keys for the tidy metrics frame. The published pair keeps its
-# canonical naming.py keys; the variants are diagnosis-only and never reach
-# a paper table under these names, which is also why this script writes with
-# write_matrices=False (see write_metrics).
+# Model keys for the tidy metrics frame. The two pipeline scores keep their
+# canonical naming.py keys; the variants are diagnosis-only, which is also
+# why this script writes with write_matrices=False (see write_metrics).
 VARIANT_KEYS = {
     "directed":      "gargaml_d",
     "undirected":    "gargaml_u",
@@ -131,13 +125,13 @@ def synthetic_datasets(sizes=(100,)):
 DATASETS = synthetic_datasets()
 
 # Slurm overrides; the constants above remain the documented defaults.
-# A capped run (SAMPLE_NODES) deliberately writes no metrics file.
+# A capped run (SAMPLE_NODES) writes no metrics file.
 DATASETS = select_datasets(DATASETS)
 SAMPLE_NODES = env_override("sample_nodes", SAMPLE_NODES,
                             lambda r: None if r.lower() in ("none", "all") else int(r))
 RESULTS_DIR = resolve_results_dir()
-# Widen when the budget allows. HI-Small is only meaningful sampled -- see
-# SAMPLE_NODES and the caveat in the module docstring.
+# HI-Small is only meaningful sampled -- see SAMPLE_NODES and the caveat in
+# the module docstring.
 # DATASETS = synthetic_datasets((100, 10000))
 # DATASETS = synthetic_datasets() + ["HI-Small"]
 
@@ -158,10 +152,9 @@ def build_graph(dataset):
 def check_parity(nodes, G, G_und, G_rev, rng):
     """Verify the diagnosis reproduces the pipeline on a sample of nodes.
 
-    The whole table is only readable if its ``directed`` column is the
-    number the pipeline writes, so this is checked rather than assumed --
-    and checked per dataset, because the level assignment depends on the
-    graph, not just on the code.
+    The table is only readable if its ``directed`` column is the number the
+    pipeline writes, so this is checked per dataset: the level assignment
+    depends on the graph, not just on the code.
     """
     sample = rng.choice(len(nodes), size=min(PARITY_SAMPLE, len(nodes)),
                         replace=False)
@@ -173,13 +166,11 @@ def check_parity(nodes, G, G_und, G_rev, rng):
 def structural_roles(G, labelled):
     """Approximate source / mule / target role for each labelled node.
 
-    Derived from the directed edges **between labelled nodes**: a source
-    only pays out, a target only receives, a mule does both. Exact for the
+    Derived from the directed edges between labelled nodes: a source only
+    pays out, a target only receives, a mule does both. Exact for the
     ``separate`` patterns, which are disconnected components; approximate
     for ``new_mules`` and ``existing_mules``, where a participant can also
-    border a labelled node from another pattern. Reported because it is
-    what makes the diagnosis legible -- Eq. 14 is oriented correctly for
-    sources and backwards for targets -- not as a published quantity.
+    border a labelled node from another pattern.
     """
     labelled = set(labelled)
     roles = {}
@@ -282,11 +273,11 @@ def write_summary(df, dataset, has_labels):
 def write_variant_metrics(df, dataset, labels):
     """Ranking + AUC metrics for every variant, against every label column.
 
-    Goes through the shared evaluation module (task 2), so the variants are
-    measured with exactly the metrics the rest of the revision reports.
+    Goes through the shared evaluation module, so the variants are measured
+    with exactly the metrics the rest of the results use.
     ``write_matrices=False``: these are diagnosis-only model keys with no
-    historical matrix format behind them, and inventing one would create
-    files no notebook reads.
+    matrix format behind them, and inventing one would create files no
+    notebook reads.
     """
     records = []
     for target in SYNTHETIC_LABELS:
@@ -335,8 +326,7 @@ def main():
               "set) -- rerun over the full DATASETS list to regenerate the pooled files")
         return
 
-    # Pool the grid, which is where the argument actually lives: one
-    # 100-node dataset is too small to carry it.
+    # Pool the grid: one 100-node dataset is too small to read on its own.
     if summaries:
         pooled = pd.concat([pd.read_csv(p) for p in summaries], ignore_index=True)
         pooled.to_csv(RESULTS_DIR+"/directed_diagnosis_summary.csv", index=False)

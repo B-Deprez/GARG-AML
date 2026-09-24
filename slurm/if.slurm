@@ -6,7 +6,7 @@
 # SUBMIT   sbatch slurm/if.slurm
 # ARRAY    None.
 # PREREQ   The same stage-1 measures as slurm/tree.slurm, same dataset name.
-# RESUMES  NO.
+# RESUMES  No.
 # CPUS     4 -- IsolationForest is fit once per cell, not in parallel here.
 # MEM      64g, the same feature-table reasoning as tree.slurm.
 # TIME     02:00:00 -- an isolation forest is cheaper than the boosting grid.

@@ -1,3 +1,7 @@
+# Multiprocessing sanity check, not part of the pipeline: runs the directed
+# measures over the synthetic grid and writes them to
+# results/<dataset>_GARGAML_directed_test.csv.
+# Run from the repository root; all paths below are root-relative.
 import os
 import sys
 import time

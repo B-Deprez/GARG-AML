@@ -1,5 +1,5 @@
 """
-Build the revision's tables from the tidy metrics (P1, P2, P3, P7).
+Build the result tables from the tidy metrics.
 
 Reads every ``results/<dataset>_<direction><suffix>_metrics.csv`` and writes
 ``results/table_<name>.tex`` plus a ``.csv`` twin of each. Nothing is
@@ -9,51 +9,48 @@ job finishes.
 
     python scripts/build_tables.py
 
-What it writes, and which reviewer point each answers
------------------------------------------------------
-``table_results_<dataset>_<metric>``   (P1, R2-M1)
-    Tables 10-11 across every model on disk, GraphSAGE included, at the
-    headline cut-offs and patterns, scaled by 100.
-``table_ablation_<dataset>_<direction>_<metric>``   (P3, R2-M5)
-    The four feature configs side by side. ``Degree-only`` carries no
-    GARG-AML signal, so the gap between it and the published model is the
-    answer to "significantly reducing false positives".
-``table_alerts_<dataset>_<cutoff>_<target>_<metric>``   (P2, R1-5, R2-M4)
+What it writes
+--------------
+``table_results_<dataset>_<metric>``
+    Every model on disk, GraphSAGE included, at the headline cut-offs and
+    patterns, scaled by 100.
+``table_ablation_<dataset>_<direction>_<metric>``
+    The four feature configurations side by side, including the degree-only
+    one, which carries no GARG-AML signal.
+``table_alerts_<dataset>_<cutoff>_<target>_<metric>``
     The threshold-free alert-queue table: P@K / R@K / lift@K / TP@K over
     realistic queue sizes, from the pooled out-of-fold scores where they
     exist. Written beside its ``ties@K`` companion, always.
-``table_variance_<dataset>_<metric>``   (P7, R2-M6)
+``table_variance_<dataset>_<metric>``
     Fold mean +/- std, with the fold count behind each mean.
-``table_cost_<dataset>``   (P1, scalability)
+``table_cost_<dataset>``
     GraphSAGE fit / inference seconds and peak host and GPU memory.
-``table_sweep_<dataset>_<direction>_<metric>``   (P4, R2-M3)
+``table_sweep_<dataset>_<direction>_<metric>``
     Downstream performance against the Louvain resolution, with the
     no-Louvain arm first. Only written once at least two settings are on
     disk -- run the measure scripts on the ``_res<r>`` / ``_nolouvain``
     dataset names first.
-``table_severance``   (P4, R2-M3)
+``table_severance``
     Percentage of edges the pre-processing discards, per dataset and
     setting, from ``results/louvain_severance.csv``.
-``table_splitting_<column>``   (P4, R2-M3)
+``table_splitting_<column>``
     What that discarding destroys: laundering attempts left undetectable,
     their two-hop path survival, and how many are split across communities
     -- by pattern type and resolution, from
     ``results/pattern_splitting_summary.csv`` (written by
-    ``scripts/pattern_splitting.py``). The pair with ``table_severance`` is
-    the argument: edges severed is the cost, attempts destroyed is what it
-    costs us.
+    ``scripts/pattern_splitting.py``). It reads beside ``table_severance``:
+    edges severed is the cost, attempts destroyed is what it buys.
 
-Before the tables, it prints a coverage report. Read it first: while the
-re-runs are outstanding most cells come from the 15 Sep single-split grid,
-and a table built from those is a snapshot of the old run, not of the code.
-The ``folds`` column says ``single`` for exactly those rows.
+Before the tables, it prints a coverage report of what is on disk, whose
+``folds`` column says whether a row comes from a cross-validated run or from
+a single split.
 
 Gaps
 ----
 A table with no rows on disk is announced and skipped, not written empty. A
 cell the models could not be fitted on renders as ``--``; a mean resting on
-fewer folds than the others is starred with its count. None of that is
-cosmetic -- the revision requires the gaps to be reported.
+fewer folds than the others is starred with its count. The gaps are reported
+rather than hidden.
 """
 
 import os
@@ -74,25 +71,20 @@ from src.utils.reporting import (HEADLINE_CUTOFFS, HEADLINE_TARGETS,
                                  write_table)
 from src.utils.runtime import resolve_results_dir
 
-# The datasets to build tables for. A missing one is skipped with a message,
-# so leaving LI-Large here before its run finishes costs nothing.
+# The datasets to build tables for. A missing one is skipped with a message.
 DATASETS = ["HI-Small", "LI-Large"]
 
-# Reported for both threshold-free metrics: AUC-PR is the primary one under
-# 0.1 % prevalence, and AUC-ROC is included because the task-3 ablation is
-# *invisible* on it -- degree-only is competitive and sometimes better there.
-# Quoting only ROC would let a reader conclude the opposite of the truth, so
-# the pair is the point, not a redundancy.
+# Both threshold-free metrics are reported: AUC-PR is the primary one under
+# 0.1 % prevalence, and AUC-ROC is included because the feature-group
+# ablation is largely invisible on it, so quoting ROC alone would misread it.
 METRICS = ["AUC_PR", "AUC_ROC"]
 
 # The alert-queue tables are per (cut-off, pattern) cell; one table per cell
 # in the whole grid would be 54 tables, so this is the headline slice. Each
-# pattern appears at both 0.0 ("at least one laundering transaction") and the
-# published 0.1, because the pair read side by side is what answers the
-# reviewer's question about the label cut-off: whether the ranking is
-# sensitive to where the propensity threshold sits, at the queue sizes an
-# investigator actually works. Drop the 0.0 rows here if the appendix gets
-# too long -- they are written as separate \input files.
+# pattern appears at both 0.0 ("at least one laundering transaction") and
+# 0.1, so the pair read side by side shows how sensitive the ranking is to
+# where the propensity threshold sits, at the queue sizes an investigator
+# actually works. Each cell is written as its own file.
 ALERT_CELLS = [(0.0, "Is Laundering"),
                (0.0, "SCATTER-GATHER"),
                (0.0, "GATHER-SCATTER"),
@@ -170,14 +162,15 @@ def build_alert_tables(df, dataset, written):
             if table.empty:
                 continue
             # The population is per row, not per table: a model with a
-            # pooled out-of-fold pass is ranked over every account, one
-            # still on the single split over its test slice only. The
-            # table prints it per row, so the caption points there rather
-            # than asserting one population for all of them.
+            # pooled out-of-fold pass is ranked over every account, one on a
+            # single split over its test slice only. The table prints it per
+            # row, so the caption points there rather than asserting one
+            # population for all of them.
             populations = table["ranked over"].nunique()
             population = ("the population given in the first column; rows "
-                          "differ because not every model has been re-run "
-                          "under cross-validation yet"
+                          "differ because models evaluated under "
+                          "cross-validation are ranked over pooled "
+                          "out-of-fold scores"
                           if populations > 1 else
                           "the population given in the first column")
             written += write_table(
@@ -206,7 +199,7 @@ def build_alert_tables(df, dataset, written):
 
 
 def build_sweep_tables(df, dataset, written):
-    """Task 4's resolution sweep, one table per (direction, metric).
+    """The Louvain resolution sweep, one table per (direction, metric).
 
     Silently absent until at least two Louvain settings have been run --
     sweep_table returns empty rather than presenting a single arm as a
@@ -290,10 +283,10 @@ def main():
     stale = report[report["folds"] == "single"]
     if len(stale):
         print("\n"+str(len(stale))+" of "+str(len(report))+" model/config "
-              "combinations have no fold column, i.e. they predate task 7's "
-              "cross-validation. Tables built from them describe that earlier "
-              "single-split run; re-run gargaml_tree.py with N_FOLDS >= 2 "
-              "before quoting them.")
+              "combinations have no fold column: they come from a single "
+              "train/test split. Tables built from them describe that split "
+              "rather than cross-validation; re-run gargaml_tree.py with "
+              "N_FOLDS >= 2 for fold-based numbers.")
 
     report.to_csv(RESULTS_DIR+"/table_coverage.csv", index=False)
 
@@ -305,7 +298,7 @@ def main():
     severance = severance_table(results_dir=RESULTS_DIR)
     if severance.empty:
         print("\nNo "+RESULTS_DIR+"/louvain_severance.csv yet -- run a measure "
-              "script to record how much the Louvain step discards (task 4).")
+              "script to record how much the Louvain step discards.")
     else:
         written += write_table(
             severance, "severance",
@@ -341,7 +334,7 @@ def main():
         print("splitting ("+column+"): "+str(table.shape))
     if not written:
         print("\nNo "+RESULTS_DIR+"/pattern_splitting_summary.csv yet -- run "
-              "scripts/pattern_splitting.py (task 4).")
+              "scripts/pattern_splitting.py.")
 
     for dataset in DATASETS:
         build_dataset(df, dataset, written)

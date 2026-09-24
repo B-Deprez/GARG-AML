@@ -1,13 +1,11 @@
 """
-Feature column groups for the GARG-AML tree/boosting models (task 3).
+Feature column groups for the GARG-AML tree/boosting models.
 
-The reviewer (R2-M5) objected that the tree models are fed a mixture of
-signals while the baselines get none, so no ablation isolates where the
-lift comes from. This module makes the mixture explicit: four column
-groups, and named configurations that select subsets of them. Every
+The tree models are fed a mixture of signals, and the ablations isolate
+where the lift comes from. This module makes the mixture explicit: four
+column groups, and named configurations that select subsets of them. Every
 script that trains a tree or a boosting model asks here for its columns
-instead of carrying its own list, which is what stops the next ablation
-from growing a parallel train/eval path (``gargaml_tree_blocks.py`` did).
+instead of carrying its own list.
 
 The groups
 ----------
@@ -22,31 +20,20 @@ The groups
 ``d``  min/mean/max/std of the neighbours' GARG-AML scores.
 =====  ==========================================================
 
-Note on ``full``
-----------------
-The published model is **(a) + (c) + (d)** -- it never received the raw
-block densities or sizes. The task-3 write-up describes it as
-"(a+b+c+d)", which is a misreading of the old ``gargaml_columns`` list;
-the block-density confound the reviewer worries about was therefore never
-in the published numbers. ``full`` is kept as-is so Tables 10-11 stay
-reproducible, and the genuinely-all-four config is a separate entry
-(``all``), which answers the question the reviewer meant to ask without
-redefining a published model.
-
-Group order inside ``full`` is historical: it reproduces the exact
-``gargaml_columns`` ordering the script carried before this refactor, so
-the columns reach the estimator in the same order as the runs in the
-paper.
+The configurations
+------------------
+``full`` is the model the paper reports, and it is **(a) + (c) + (d)**: it
+receives no raw block densities or sizes. ``all`` is the genuinely
+all-four config, ``blocks`` the (b)-only ablation and ``topology`` the
+(c)-only one.
 
 Output schema
 -------------
-The config name is written to the ``features`` column of the tidy CSV
-(see src/utils/evaluation.py) and, via :func:`config_suffix`, into the
-result filenames -- so these strings are part of the published output
-schema, not an implementation detail. ``full`` keeps the historical
-suffix-less names, so the visualisation notebooks need no edits.
-:func:`feature_schema` emits the per-config appendix table asked for by
-task 10.
+The config name is written to the ``features`` column of the tidy CSV (see
+src/utils/evaluation.py) and, via :func:`config_suffix`, into the result
+filenames, so these strings are part of the output schema rather than an
+implementation detail; ``full`` carries no suffix.
+:func:`feature_schema` emits the per-config appendix table.
 """
 
 from __future__ import annotations
@@ -69,18 +56,12 @@ GROUP_BLOCKS_DIRECTED = (
     + [f"size_{i}{j}" for i in range(3) for j in range(3)]
 )
 
-# Group (c): the topology-only group. No GARG-AML anywhere in it -- that
-# is the whole point of the (c)-only ablation.
-#
-# These degrees are measured on the **Louvain-reduced** graph, not the raw
-# transaction graph (~90% of HI-Small's edges are inter-community and get
-# dropped). That is deliberate: the ablation asks what a tree can do with
-# topology alone *given the same preprocessing* GARG-AML gets, so the
-# comparison isolates the feature groups rather than confounding them with
-# the edge-removal step. A raw-degree baseline is a different question --
-# "can plain degree find smurfs at all" -- and belongs with task 4's
-# no-Louvain run, not here. Do not silently switch which graph this is
-# computed on.
+# Group (c): the topology-only group, with no GARG-AML signal anywhere in
+# it. These degrees are measured on the **Louvain-reduced** graph, not the
+# raw transaction graph: the ablation asks what a tree can do with topology
+# alone given the same pre-processing GARG-AML gets, so the comparison
+# isolates the feature groups rather than confounding them with the
+# edge-removal step.
 GROUP_DEGREE = [
     "degree", "degree_min", "degree_max", "degree_mean", "degree_std",
 ]
@@ -100,23 +81,22 @@ GROUP_NAMES: dict[str, str] = {
 # Config name -> ordered group keys. Order matters: it is the order in
 # which the columns reach the estimator.
 FEATURE_CONFIGS: dict[str, tuple[str, ...]] = {
-    "full":     ("a", "d", "c"),   # the published model; order is historical
+    "full":     ("a", "d", "c"),   # the model the paper reports
     "blocks":   ("b",),            # block-only ablation
-    "topology": ("c",),            # topology-only ablation (R2-M5)
+    "topology": ("c",),            # topology-only ablation
     "all":      ("a", "b", "c", "d"),
 }
 
 # Groups whose columns do *not* change with the direction of the analysis.
-# Groups (a), (b) and (d) all derive from the direction-specific measures
-# CSV. Group (c) does not: ``summarise_gargaml_scores`` is handed the
-# *undirected* reduced graph in both cases (see the "For summary, we use
-# the undirected graph" line in scripts/gargaml_tree.py), so the degree
-# columns are byte-identical between the directed and undirected runs.
+# Groups (a), (b) and (d) derive from the direction-specific measures CSV.
+# Group (c) does not: ``summarise_gargaml_scores`` is handed the *undirected*
+# reduced graph in both cases, so the degree columns are identical between
+# the directed and undirected runs.
 DIRECTION_FREE_GROUPS = frozenset({"c"})
 
 # Groups that need the Louvain-reduced graph. Group (b) comes straight out
 # of the measures CSV, so a blocks-only run skips graph construction and
-# Louvain entirely -- which is the whole run time of this script.
+# Louvain entirely, which is where the run time goes.
 NEIGHBOURHOOD_GROUPS = frozenset({"a", "c", "d"})
 
 
@@ -136,12 +116,10 @@ def _check_config(config):
 def is_direction_free(config):
     """True when ``config``'s feature matrix is identical for both directions.
 
-    Only ``topology`` qualifies today. It matters because the caller must
-    then run the config **once**, not once per direction: a second pass
+    Such a config is run **once**, not once per direction: a second pass
     would refit the same matrix and write a second set of result files
     implying a directed/undirected distinction that does not exist. Derived
-    from the group set rather than hard-coded, so a future group-(c)-only
-    config is picked up automatically.
+    from the group set rather than hard-coded.
     """
     _check_config(config)
     return set(FEATURE_CONFIGS[config]) <= DIRECTION_FREE_GROUPS
@@ -173,9 +151,8 @@ def feature_columns(config, directed):
 def all_feature_columns(configs, directed):
     """Union of the columns needed by ``configs``, without duplicates.
 
-    One data preparation serves every config -- building the graph and
-    running Louvain once instead of once per ablation is where the run
-    time of these scripts actually goes.
+    One data preparation serves every config, so the graph is built and
+    Louvain run once rather than once per ablation.
     """
     columns = []
     for config in configs:
@@ -186,13 +163,13 @@ def all_feature_columns(configs, directed):
 
 
 def config_suffix(config):
-    """Result-file suffix for ``config``; empty for the published model."""
+    """Result-file suffix for ``config``; empty for ``full``."""
     _check_config(config)
     return "" if config == "full" else "_" + config
 
 
 # ---------------------------------------------------------------------------
-# Documentation (task 10)
+# Documentation
 # ---------------------------------------------------------------------------
 
 def _feature_kind(column):

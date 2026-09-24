@@ -1,20 +1,16 @@
 """
-Why the undirected score beats the directed one (task 6).
+Diagnostics for the directed GARG-AML score.
 
-R2-M2: the directed variant is motivated in Section 3.3 by uni-directional
-flow being definitional for smurfing, yet it *loses* to the undirected
-score. The reviewer names two candidate explanations:
+The directed variant of Section 3.3 is motivated by uni-directional flow
+being definitional for smurfing, yet it scores below the undirected variant
+of Section 3.2. Two mechanisms can account for that: the penalty carried by
+bidirectional edges, and the level-assignment rule of Eq. 11. This module
+instruments both, per node, so they can be told apart with numbers. Nothing
+here changes the pipeline: :func:`diagnose_node` recomputes the score
+itself and is never called from ``GARGAML.py``.
 
-  (a) the directed variant **over-penalises benign bidirectional edges**;
-  (b) the **level-assignment rule (Eq. 11) is too strict**.
-
-This module instruments both, per node, so the two can be told apart with
-numbers instead of argument. Nothing here changes the published pipeline:
-:func:`diagnose_node` recomputes the score itself, it is never called from
-``GARGAML.py``.
-
-What Eq. 11 actually assigns
-----------------------------
+What Eq. 11 assigns
+-------------------
 ``GARG_AML_nodeselection_directed`` splits the undirected second-order ego
 graph into three levels:
 
@@ -30,31 +26,9 @@ receivers (2)**. The implementation does not separate senders from
 receivers: a node that reaches ``v`` in two hops (a sender, which §3.3
 puts at level 0) and a node ``v`` reaches in two hops (a receiver, level
 2) both land in level 2. :func:`reachability_split` counts the four cases
-separately, so ``reverse_only`` is a direct count of nodes placed at
-level 2 where §3.3 puts them at level 0, and ``neither`` is a direct
-count of the ones Eq. 11 leaves unresolved and dumps into level 0
-alongside the node itself.
-
-Why that matters, on the pattern the method is built for
--------------------------------------------------------
-On ``S -> m1..m4 -> T`` the three roles score (Eq. 14 / Eq. 8):
-
-===========  =============  ==============
-role         directed       undirected
-===========  =============  ==============
-source ``S``      **1.000**       1.000
-mule ``m_i``      **0.179**       1.000
-target ``T``     **-0.286**       1.000
-===========  =============  ==============
-
-The undirected score awards every participant the maximum. The directed
-score is right about the source, weak about the mules and *negative*
-about the target -- it ranks the receiving end as less smurfing-like than
-an average node. A pattern has one source and ``k+1`` other participants
-(``k`` in 2..10), so Eq. 14 is oriented correctly for a minority of the
-positives by construction. That is hypothesis (b), and it is a property
-of the fixed orientation of Eq. 14 relative to the level assignment, not
-of any particular dataset.
+separately, so ``reverse_only`` counts the nodes placed at level 2 where
+§3.3 puts them at level 0, and ``neither`` counts the ones Eq. 11 leaves
+unresolved and groups with the node itself at level 0.
 
 The score variants
 ------------------
@@ -62,27 +36,23 @@ Each variant isolates one candidate cause; all five are computed on the
 same ego graph so their differences are attributable.
 
 ``directed``
-    Eq. 14 exactly as published. The baseline.
+    Eq. 14 as it stands. The baseline.
 ``transpose``
     Eq. 14 with the reward blocks taken on the other side of the diagonal
     (``mean(m10, m21)`` rewarded). A node whose flow runs the other way
     scores here what a source scores under ``directed``.
 ``max_transpose``
     ``max(directed, transpose)``: orientation-blind. The gap to
-    ``directed`` is the cost of Eq. 14's fixed orientation, and therefore
-    the size of hypothesis (b). This quantity exists as dead code in
-    ``GARG_AML_node_directed``; it is **not** in the paper and must not be
-    reinstated in the pipeline on the strength of this diagnosis -- it is
-    measured here as a diagnostic upper bound, not proposed as the score.
+    ``directed`` measures the cost of Eq. 14's fixed orientation. It is a
+    diagnostic upper bound, not a proposed score: Eq. 14 has no such step.
 ``flow_split``
     Eq. 14 under the §3.3 level assignment: senders (reverse-reachable)
     move from level 2 to level 0, receivers stay at level 2. Isolates the
     level rule from the orientation of Eq. 14 itself.
 ``no_reciprocal``
     Eq. 14 after deleting both directions of every reciprocal edge pair in
-    the ego graph, with the levels recomputed on that graph. This is
-    hypothesis (a): if benign two-way relationships are what sinks the
-    directed score, removing them should lift it.
+    the ego graph, with the levels recomputed on that graph. Measures how
+    much of the score two-way relationships account for.
 
 Reciprocal edges, and why the count is exact
 --------------------------------------------
@@ -92,8 +62,7 @@ reward blocks are off-diagonal, and neither of their mirror images
 consecutive levels necessarily puts one unit of mass in a penalty block**
 -- there is no orientation of the pair that avoids it.
 :func:`reciprocal_census` counts those pairs and splits them by where
-their two directions land, which turns "over-penalises bidirectional
-edges" into a measured quantity rather than a supposition.
+their two directions land.
 """
 
 from __future__ import annotations
@@ -132,9 +101,8 @@ def ego_graphs(node, G, G_und, G_rev):
     """The three ego graphs ``GARG_AML_node_directed_measures`` builds.
 
     Reproduced here rather than imported because the diagnosis needs the
-    intermediate objects, not just the measures. Kept byte-for-byte
-    equivalent to that function's first three lines -- if those change,
-    change these.
+    intermediate objects, not just the measures; the construction is
+    equivalent to that function's first three lines.
     """
     G_ego_und = nx.ego_graph(G_und, node, 2)
     G_ego = nx.subgraph(G, G_ego_und.nodes)
@@ -155,13 +123,12 @@ def reachability_split(node, G_ego, G_ego_und, G_ego_rev):
     ``reverse_only``
         reaches ``node`` in <= 2 directed hops but is not reachable from
         it -- a **sender**. §3.3 puts these at level 0; Eq. 11 as
-        implemented puts them at level 2. This count is the
-        misassignment.
+        implemented puts them at level 2.
     ``both``
         reachable in both directions, i.e. sitting on a directed cycle
-        through ``node``'s neighbourhood. Genuinely ambiguous: no level
-        assignment can be right about it, and it is worth reporting
-        separately rather than folding into either side.
+        through ``node``'s neighbourhood. Ambiguous: no level assignment
+        can be right about it, so it is reported separately rather than
+        folded into either side.
     ``neither``
         at undirected distance 2 with no directed 2-path either way -- for
         instance two accounts paying into the same mule. **Unresolved by
@@ -189,8 +156,9 @@ def levels_published(split):
     """(level 0, level 1, level 2) exactly as Eq. 11 is implemented.
 
     Every distance-2 node reachable in *either* direction goes to level 2;
-    the unresolved ones join ``node`` at level 0. Verified against
-    ``GARG_AML_nodeselection_directed`` by :func:`check_against_pipeline`.
+    the unresolved ones join ``node`` at level 0.
+    :func:`check_against_pipeline` asserts this matches
+    ``GARG_AML_nodeselection_directed``.
     """
     nodes_0 = [split["node"]] + sorted(split["neither"], key=str)
     nodes_1 = sorted(split["nodes_1"], key=str)
@@ -221,10 +189,8 @@ def levels_flow_split(split):
 def block_measures(adj_full, size_0, size_1, size_2):
     """The nine directed block densities, through the pipeline's own functions.
 
-    Importing them rather than reimplementing matters: the negative-slice
-    defect fixed in ``c5fba86`` lived in exactly these functions, and a
-    second copy here would be free to drift back to the broken behaviour
-    the stored results still carry.
+    Imported rather than reimplemented, so the diagnosis and the pipeline
+    cannot disagree about what a block density is.
     """
     return {
         "00": measure_00_function(adj_full, size_0)[0],
@@ -240,35 +206,26 @@ def block_measures(adj_full, size_0, size_1, size_2):
 
 
 def prefix_block_measures(adj_full, size_0, size_1, size_2):
-    """The nine block densities **as they were computed before ``c5fba86``**.
+    """The nine block densities under an alternative empty-block convention.
 
-    Deliberately a second implementation, unlike :func:`block_measures`,
-    and deliberately the broken one. It exists for exactly one purpose:
-    every directed measure file on disk -- ``results/``, ``results-0/``
-    and ``results-3/`` alike -- still holds these values, so a diagnosis
-    that only reported the fixed score could not say how much of the
-    *published* directed underperformance is the defect and how much is
-    the design. Never call it from anything but the diagnosis.
+    A sensitivity variant, deliberately a second implementation and used
+    only by the diagnosis: it quantifies how much of the directed score
+    rests on the treatment of empty blocks. Both conventions below apply
+    only when ``size_2 == 0``, i.e. to nodes with no level-2 neighbours:
 
-    Two separate defects, both firing only when ``size_2 == 0``:
-
-    * ``measure_12`` returned 1 for an empty block unconditionally --
-      full credit on a **reward** block for a node with no level-2
-      neighbours at all.
-    * ``measure_20/21/22`` sliced with ``adj_full[-size_2:]``, and
-      ``-0:`` is the whole array rather than an empty one, so three
-      **penalty** blocks were computed from unrelated parts of the
-      matrix.
-
-    On HI-Small this hit 245,725 of 515,080 nodes (47.7%).
+    * ``measure_12`` is 1 for an empty block unconditionally -- full credit
+      on a **reward** block for a node with no level-2 neighbours at all.
+    * ``measure_20/21/22`` slice with ``adj_full[-size_2:]``, and ``-0:``
+      spans the whole array rather than an empty one, so three **penalty**
+      blocks are computed from unrelated parts of the matrix.
     """
     measures = block_measures(adj_full, size_0, size_1, size_2)
 
     if adj_full[size_0:size_0 + size_1, size_0 + size_1:].size == 0:
-        measures["12"] = 1  # was unconditional, now requires size_2 > 0
+        measures["12"] = 1  # an empty reward block counts as dense here
 
     if size_2 == 0:
-        # -0: is the whole array. Reproduce that, verbatim.
+        # -0: spans the whole array, which is what this variant measures.
         for key, piece in (("20", adj_full[-size_2:, :size_0]),
                            ("21", adj_full[-size_2:, size_0:size_0 + size_1]),
                            ("22", adj_full[-size_2:, -size_2:])):
@@ -292,7 +249,7 @@ def measures_for_levels(G_ego, nodes_0, nodes_1, nodes_2):
 
 
 # ---------------------------------------------------------------------------
-# Bidirectional edges (hypothesis a)
+# Bidirectional edges
 # ---------------------------------------------------------------------------
 
 def reciprocal_pairs(G_ego):
@@ -306,9 +263,7 @@ def reciprocal_census(G_ego, nodes_0, nodes_1, nodes_2):
     Because Eq. 14's two reward blocks are off-diagonal and neither of
     their mirror images is also a reward block, a reciprocal pair spanning
     levels 0-1 or 1-2 puts exactly one of its two directions in a reward
-    block and the other in a penalty block. ``penalised`` counts those:
-    they are the "benign bidirectional edges being penalised" of R2-M2's
-    hypothesis (a), counted rather than assumed.
+    block and the other in a penalty block; ``penalised`` counts those.
 
     Pairs inside one level, or spanning levels 0-2, land in penalty blocks
     on both sides; they are counted as ``both_penalty``. A pair cannot
@@ -341,11 +296,10 @@ def reciprocal_census(G_ego, nodes_0, nodes_1, nodes_2):
 def drop_reciprocal(G_ego):
     """A copy of ``G_ego`` with both directions of every reciprocal pair gone.
 
-    Both directions, not one: the question hypothesis (a) asks is what the
-    score would be if two-way relationships were simply not evidence,
-    which means removing their reward mass along with their penalty mass.
-    Keeping one direction would instead invent a flow direction that the
-    data does not support.
+    Both directions, not one: the question is what the score would be if
+    two-way relationships were not evidence at all, which means removing
+    their reward mass along with their penalty mass. Keeping one direction
+    would instead invent a flow direction the data does not support.
     """
     H = nx.DiGraph()
     H.add_nodes_from(G_ego.nodes(data=True))
@@ -374,7 +328,7 @@ def diagnose_node(node, G, G_und, G_rev):
     directed = eq_14(measures)
     transpose = eq_14(measures, REWARD_BLOCKS_T, PENALTY_BLOCKS_T)
 
-    # What the stored results actually contain; see prefix_block_measures.
+    # The same score under the alternative empty-block convention.
     ordered = list(nodes_0) + list(nodes_1) + list(nodes_2)
     adj = nx.to_numpy_array(G_ego, nodelist=ordered, dtype=int)
     prefix = eq_14(prefix_block_measures(adj, len(nodes_0), len(nodes_1),
@@ -383,16 +337,15 @@ def diagnose_node(node, G, G_und, G_rev):
     f0, f1, f2 = levels_flow_split(split)
     flow_split = eq_14(measures_for_levels(G_ego, f0, f1, f2))
 
-    # Hypothesis (a): recompute from scratch on the de-reciprocated ego
-    # graph, levels included -- removing edges changes directed
-    # reachability, so reusing the old levels would mix the two effects.
+    # Recomputed from scratch on the de-reciprocated ego graph, levels
+    # included: removing edges changes directed reachability, so reusing the
+    # earlier levels would mix the two effects.
     H = drop_reciprocal(G_ego)
     H_split = reachability_split(node, H, G_ego_und, H.reverse(copy=True))
     h0, h1, h2 = levels_published(H_split)
     no_reciprocal = eq_14(measures_for_levels(H, h0, h1, h2))
 
-    # Eq. 8 on the same neighbourhood, as the reference the reviewer is
-    # comparing against.
+    # Eq. 8 on the same neighbourhood, as the reference point.
     G_ego_u2 = nx.ego_graph(G_und, node, 2)
     u1, u2, u_ordered = GARG_AML_nodeselection_undirected(G_ego_u2, node)
     adj_u = nx.to_numpy_array(G_ego_u2, nodelist=u_ordered, dtype=int)
@@ -408,8 +361,8 @@ def diagnose_node(node, G, G_und, G_rev):
 
     row = {
         "node": node,
-        # Level census. size_2 == 0 is called out because that is the case
-        # the c5fba86 slicing defect corrupted in every stored result.
+        # Level census; an empty level 2 is flagged separately, since the
+        # empty-block conventions only bite there.
         "n_level0": len(nodes_0),
         "n_level1": len(nodes_1),
         "n_level2": len(nodes_2),
@@ -440,11 +393,11 @@ def diagnose_node(node, G, G_und, G_rev):
 
 
 def check_against_pipeline(node, G, G_und, G_rev, tol=1e-12):
-    """Assert this module reproduces the published score for ``node``.
+    """Assert this module reproduces the pipeline's score for ``node``.
 
     The diagnosis is only worth reading if its ``directed`` column is the
-    same number the pipeline writes, so this is run on a sample at the
-    start of every diagnosis run rather than trusted.
+    same number the pipeline writes, so this runs on a sample at the start
+    of every diagnosis run.
     """
     from .GARGAML import GARG_AML_node_directed_measures
     from .utils.neighbourhood_functions import GARG_AML_nodeselection_directed

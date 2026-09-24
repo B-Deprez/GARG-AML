@@ -1,28 +1,17 @@
 """
-Block-only ablation of GARG-AML (task 3).
+Block-only ablation of GARG-AML.
 
 Runs the shared tree/boosting path of ``scripts/gargaml_tree.py`` on the
 ``blocks`` feature config: only the per-node *block densities and block
 sizes* produced by the adjacency-matrix block analysis. No degree
-features, no neighbour aggregations, no aggregated GARG-AML score.
+features, no neighbour aggregations, no aggregated GARG-AML score, which
+isolates how much of the lift comes from the block layout itself.
 
-It is one of the three ablations the reviewer asked for:
-
-* topology-only (``topology``) -> only own + neighbour degree stats,
-                                  no GARG-AML at all
-* block-only (``blocks``, here) -> only per-node block densities + sizes,
-                                   before aggregation
-* the published model (``full``) -> aggregated score + neighbour score
-                                    stats + degree stats
-* (``all``)                      -> literally all four groups
-
-Together they answer "how much of the lift comes from the GARG-AML block
-layout, and how much from the neighbour-degree summary". The column
-groups themselves live in ``src/utils/features.py``; the train/evaluate
+The column groups live in ``src/utils/features.py``; the train/evaluate
 loop lives in ``scripts/gargaml_tree.py``. This file exists so the
 ablation can be re-run on its own -- ``gargaml_tree.py`` runs all four
-configs off one data preparation, which is the cheaper way to get the
-full grid.
+feature configs off one data preparation, which is the cheaper way to
+get the full grid.
 
 Input CSVs (already produced by gargaml_undirected.py / gargaml_directed.py):
 

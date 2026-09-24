@@ -1,73 +1,60 @@
 """
-Shared evaluation for GARG-AML results (task 2).
+Shared evaluation for GARG-AML results.
 
-Single code path for every model in the repository -- the tree/boosting
-models on IBM data, the block-only ablation, the synthetic runs, the
-isolation forest and the raw GARG-AML scores. Before this module each
-script defined its own ``evaluate_model``, which is how the
-``clf.predict()`` defect below survived in five places at once.
+One code path for every model in the repository: the tree/boosting models on
+IBM data, the feature-group ablations, the synthetic runs, the isolation
+forest and the raw GARG-AML scores.
 
 Three jobs:
 
 1. **Continuous scores.** :func:`model_scores` returns a ranking score for
    any of the estimators used here (``predict_proba`` -> ``decision_function``
-   -> ``-score_samples`` for the isolation forest). AUC-ROC and AUC-PR were
-   previously computed from ``clf.predict()``, i.e. from hard 0/1 labels;
-   that understates both, and the ranking metrics below need a score that
-   actually orders the accounts.
+   -> ``-score_samples`` for the isolation forest). Every threshold-free
+   metric is computed from those scores, never from hard 0/1 labels.
 
-2. **Ranking metrics** (reviewers R1-5 / R2-M4): Precision@K, Recall@K,
-   lift@K and #TP@K, swept over realistic alert-queue sizes
-   (:data:`ALERT_SIZES`) rather than fractions of the node set -- the point
-   is investigator workload. Average precision is *not* added here: the
-   existing ``AUC_PR`` column already is average precision, it was simply
-   computed from labels instead of scores.
+2. **Ranking metrics.** Precision@K, Recall@K, lift@K and #TP@K, swept over
+   realistic alert-queue sizes (:data:`ALERT_SIZES`) rather than fractions of
+   the node set, since the quantity of interest is investigator workload. The
+   ``AUC_PR`` column is average precision, so there is no separate AP column.
 
-3. **Result writing.** :func:`write_metrics` emits one tidy CSV holding
-   every metric, and reproduces the historical
-   ``<dataset>_<metric>_<model>_<direction>_combined.csv`` matrices
-   unchanged, so the visualisation notebooks keep working untouched.
+3. **Result writing.** :func:`write_metrics` emits one tidy CSV holding every
+   metric, plus the per-metric
+   ``<dataset>_<metric>_<model>_<direction>_combined.csv`` matrices the
+   visualisation notebooks read.
 
 Label cut-offs
 --------------
-:data:`CUT_OFFS` is the one label sweep every script reads, and
+:data:`CUT_OFFS` is the label sweep every script reads, and
 :data:`HEADLINE_CUTOFFS` the slice the manuscript reports and the expensive
-runs restrict themselves to. Both include ``0.0`` -- see the comment on
-:data:`CUT_OFFS` for what a cut-off of zero means and why it is here.
+runs restrict themselves to.
 
 Evaluation population
 ---------------------
-Metrics are computed on the 30% test split by default (:func:`holdout_split`),
-consistent with the precision/F1/AUC numbers in the paper. Task 7 adds
-:func:`cv_splits` for the IBM tree/boosting runs: 5-fold stratified CV,
-whose disjoint test folds additionally allow a pooled out-of-fold pass over
-every account (the alert-queue headline numbers) rather than a 20-30% slice.
-``holdout_split`` is not replaced -- the synthetic scripts keep using it.
-``K`` is an absolute alert count,
-so it can exceed the number of test rows or the number of positives; the
-metric is still written, with ``n_test`` and ``n_pos`` beside it, so that
-e.g. ``R@1000 = 1.0`` off 12 positives is readable as trivial rather than
-impressive.
+:func:`holdout_split` is a single 70/30 stratified split, used by the
+synthetic scripts. :func:`cv_splits` is 5-fold stratified CV for the IBM
+tree/boosting runs; its disjoint test folds also allow a pooled out-of-fold
+pass over every account rather than a 20-30% slice. ``K`` is an absolute
+alert count, so it can exceed the number of test rows or the number of
+positives; the metric is still written, with ``n_test`` and ``n_pos`` beside
+it, so that e.g. ``R@1000 = 1.0`` off 12 positives is readable as trivial
+rather than impressive.
 
-Folds (task 7)
---------------
+Folds
+-----
 :func:`cv_splits` returns each fold's train/test indices; :func:`write_folds`
-persists the resulting account/cutoff/target/fold membership to
-``results/<dataset>_folds.csv`` so a later model (task 1's GraphSAGE) can
-read the same partition instead of re-deriving it. In the tidy CSV, the
-``fold`` column is ``0..n_splits-1`` for a per-fold row, ``-1`` for a pooled
-out-of-fold row, and ``NaN`` for a single-split run.
-:func:`aggregate_folds` reduces the per-fold rows to mean/std/min/max plus
-``n_folds_ok``, for whoever builds the manuscript's variance-estimate table.
+persists the account/cutoff/target/fold membership to
+``results/<dataset>_folds.csv`` so a later model reads the same partition
+instead of re-deriving it. In the tidy CSV, ``fold`` is ``0..n_splits-1`` for
+a per-fold row, ``-1`` for a pooled out-of-fold row, and ``NaN`` for a
+single-split run. :func:`aggregate_folds` reduces the per-fold rows to
+mean/std/min/max plus ``n_folds_ok``.
 
 Ties
 ----
 Decision trees emit few distinct probabilities, so many accounts share a
 score and "the top 50" is not always uniquely defined. The metrics take
-exactly K rows after a stable sort, which is the standard definition and
-is reproducible; ``ties@K`` reports the size of the score group straddling
-the cut, and equals 1 when the top-K set is unambiguous. Report it rather
-than let an arbitrary ordering pass silently.
+exactly K rows after a stable sort; ``ties@K`` reports the size of the score
+group straddling the cut, and equals 1 when the top-K set is unambiguous.
 """
 
 from __future__ import annotations
@@ -85,12 +72,10 @@ from sklearn.metrics import (
 )
 from sklearn.model_selection import StratifiedKFold, train_test_split
 
-# Realistic alert-queue sizes: what a team can actually work through,
-# not a fraction of the node set. K=10 is here for the synthetic grid, whose
-# 100-node datasets leave a 30-row test split -- every larger K collapses onto
-# the same number there (k_eff = min(K, n)), so P@50 and P@100 are literally
-# equal and report nothing but overall precision. It is reported on the IBM
-# data too, where it is additive: nothing selects a K by position.
+# Realistic alert-queue sizes: what a team can work through, not a fraction of
+# the node set. K=10 matters on the synthetic grid, whose 100-node datasets
+# leave a 30-row test split -- every larger K collapses onto k_eff = min(K, n)
+# there, so P@50 and P@100 report nothing but overall precision.
 ALERT_SIZES = [10, 50, 100, 500, 1000]
 
 # The label cut-off sweep, canonical for the whole repository.
@@ -98,50 +83,33 @@ ALERT_SIZES = [10, 50, 100, 500, 1000]
 # An account's label for a target column is its *propensity*: that account's
 # laundering-flagged transactions of that type over all of its transactions
 # (src/data/pattern_construction.py::summarise_ML_labels). Every call site
-# labels with the strict comparison ``propensity > cutoff``, so 0.0 is a
-# cut-off like any other and means "involved in at least one laundering
-# transaction" -- the most inclusive labelling available, and the one a
-# reviewer asked for: at 0.1 an account whose single laundering transaction
-# sits among ten legitimate ones is already labelled clean, which is a
-# modelling choice the paper never justified. It is also the cut-off with the
-# most positives, so it is the cell most likely to be evaluable where 0.5 and
-# 0.9 come back NaN for too few of them.
-#
-# Declared here rather than per script: gargaml_tree.py, gargaml_IF.py and
-# distribution_scores.py each carried their own copy of this list, which is
-# how three sweeps that must agree drift apart.
+# labels with the strict comparison ``propensity > cutoff``, so 0.0 means
+# "involved in at least one laundering transaction" -- the most inclusive
+# labelling available, and the cut-off with the most positives, hence the one
+# most likely to be evaluable where 0.5 and 0.9 come back NaN.
 CUT_OFFS = [0.0, 0.1, 0.2, 0.3, 0.5, 0.9]
 
-# The slice that is actually reported (Tables 10-11) and the reduced sweep the
-# expensive runs use -- LI-Large's entry in gargaml_tree.py's DATASET_SETTINGS
-# and graphsage_baseline.py's DATASETS both point here, so the two stay
-# comparable cell for cell. 0.0 joins the published 0.1 / 0.5 / 0.9 because
-# the reviewer's question is about the label definition itself, which a
-# reduced sweep would otherwise leave unanswered on the large dataset.
+# The slice reported in Tables 10-11, and the reduced sweep the expensive runs
+# use -- LI-Large's entry in gargaml_tree.py's DATASET_SETTINGS and
+# graphsage_baseline.py's DATASETS both point here, so the two stay comparable
+# cell for cell.
 HEADLINE_CUTOFFS = [0.0, 0.1, 0.5, 0.9]
 
 # The reproducibility seed used throughout the repository.
 SEED = 1997
 
-# Default fold count for cv_splits (task 7). Distinct from a caller's own
-# "is CV even on" switch -- e.g. gargaml_tree.py's N_FOLDS, which also
-# allows 0 to mean "use holdout_split instead" -- this is just the default
-# n_splits when a caller does want CV.
+# Default n_splits for cv_splits. Distinct from a caller's own "is CV on"
+# switch -- e.g. gargaml_tree.py's N_FOLDS, where 0 means holdout_split.
 CV_FOLDS = 5
 
-# Metrics that already had a per-metric result file before this module
-# existed. Their file names must not change: the visualisation notebooks
-# glob for them.
+# Metrics that have a per-metric result file of their own; the visualisation
+# notebooks glob for those file names.
 LEGACY_METRICS = ["precision", "f1", "AUC_ROC", "AUC_PR"]
 
-# Column order of the tidy result frame.
-#
-# ``fold`` (task 7): 0..n_splits-1 for a per-fold CV row, -1 for a pooled
-# out-of-fold row, NaN for a single-split run (the synthetic scripts,
-# gargaml_IF.py, and gargaml_tree.py itself when its N_FOLDS switch is 0).
-# No caller needs to pass NaN explicitly -- metric_records builds each row
-# from a context dict, so simply not passing ``fold`` already yields NaN
-# once a DataFrame is built from mixed records.
+# Column order of the tidy result frame. ``fold`` is 0..n_splits-1 for a
+# per-fold CV row, -1 for a pooled out-of-fold row, and NaN for a single-split
+# run: metric_records builds each row from a context dict, so a caller that
+# passes no ``fold`` yields NaN once a DataFrame is built from mixed records.
 RECORD_COLUMNS = [
     "dataset", "direction", "model", "features",
     "cutoff", "target", "seed", "fold",
@@ -149,33 +117,22 @@ RECORD_COLUMNS = [
     "n_test", "n_pos", "status",
 ]
 
-# Historical file-name token per canonical model key from src/utils/naming.py.
-# The keys say "boost" but the result files have always said "boosting";
-# the files win, because renaming them would break every notebook.
+# File-name token per canonical model key from src/utils/naming.py. The keys
+# say "boost" where the result files say "boosting"; the files win, because
+# renaming them would break every notebook.
 #
-# Deliberately an allow-list, not a fallback-to-key dict: a model key with no
-# entry here has no legacy file a notebook reads, so write_metric_matrices
-# raises rather than writing an orphan CSV under its raw key. Add an entry
-# (and confirm the token against what VisualisationResults.ipynb actually
-# opens) as each further model is retrofitted onto this module -- base
-# GARG-AML scores, the isolation forest, the block-only ablation.
+# An allow-list, not a fallback-to-key dict: a model key with no entry raises
+# in write_metric_matrices rather than writing an orphan CSV under its raw key.
 LEGACY_MODEL_TOKENS = {
     "gargaml_tree_u": "tree",
     "gargaml_tree_d": "tree",
     "gargaml_boost_u": "boosting",
     "gargaml_boost_d": "boosting",
-    # No prior file exists for this one -- gargaml_IF.py's IF_AUC never persisted
-    # results before this retrofit -- so the token is new, not inherited.
     "gargaml_if_d": "isolationforest",
-    # Task 1's GraphSAGE baseline (scripts/graphsage_baseline.py) -- also a new
-    # token, no legacy file predates it.
     "graphsage_u": "graphsage",
-    # The base GARG-AML scores (scripts/distribution_scores.py) are deliberately
-    # ABSENT. That script writes its tidy frame with write_matrices=False,
-    # because its published numbers live in results_performance_IBM_*.txt and it
-    # has no matrix format to reproduce. Adding tokens here would not make those
-    # files appear -- it would only remove the guard if someone later switched
-    # that call to write matrices nothing reads. Leave them out.
+    # The base GARG-AML scores (scripts/distribution_scores.py) are absent by
+    # design: that script writes its tidy frame with write_matrices=False and
+    # has no matrix format to reproduce.
 }
 
 
@@ -184,14 +141,12 @@ LEGACY_MODEL_TOKENS = {
 # ---------------------------------------------------------------------------
 
 def holdout_split(X, y, test_size=0.3, seed=SEED):
-    """The one 70/30 stratified split, so every model sees the same slice.
+    """The single 70/30 stratified split, so every model sees the same slice.
 
-    Transductive by design (the split is on the feature table, not on the
-    graph). Task 7 supersedes this for the IBM data with 5-fold stratified
-    CV (a ``cv_splits`` helper beside this one, sharing ``seed``); it does
-    *not* vary ``seed`` for repeated random draws, because overlapping test
-    sets deflate the reported spread. This function stays as-is for the
-    synthetic scripts, which keep the single split.
+    Transductive by design: the split is on the feature table, not on the
+    graph. ``seed`` is fixed rather than varied over repeated random draws,
+    whose overlapping test sets deflate the reported spread. Used by the
+    synthetic scripts; the IBM runs use :func:`cv_splits`.
     """
     return train_test_split(
         X, y, test_size=test_size, random_state=seed, stratify=y
@@ -202,22 +157,15 @@ def cv_splits(X, y, n_splits=CV_FOLDS, seed=SEED):
     """5-fold (default) stratified CV splits, disjoint and exhaustive over ``y``.
 
     Returns a **list** of ``(fold, train_idx, test_idx)`` -- eager, not a
-    generator, so a too-small class raises right here, at the call site, the
-    same way ``holdout_split``'s stratification failure already does. The
-    minimum class count is checked explicitly rather than relying on
-    ``StratifiedKFold`` to raise: depending on the sklearn version it may
-    only warn and silently return folds where some class is missing from a
-    fold entirely, which would surface downstream as a confusing model-fit
-    or metric failure instead of the clear "too few positives" skip every
-    other guard in this module uses.
+    generator, so a too-small class raises at the call site the way
+    ``holdout_split``'s stratification failure does. The minimum class count
+    is checked explicitly rather than left to ``StratifiedKFold``, which in
+    some sklearn versions only warns and returns folds with a class missing.
 
-    Unlike repeated random draws of ``holdout_split``, the ``n_splits`` test
-    sets are disjoint and partition ``y`` exactly once each -- that is the
-    property task 7 needs a variance estimate from repeated random splits
-    would not have (their test sets overlap by design). ``seed`` is the
-    ``StratifiedKFold`` shuffle seed, kept at 1997 so the partition is
-    reproducible; it is not varied across repetitions the way a repeated
-    random split would vary it.
+    The ``n_splits`` test sets are disjoint and partition ``y`` exactly once
+    each, which is the property a variance estimate needs and repeated random
+    splits, whose test sets overlap by design, do not have. ``seed`` is the
+    ``StratifiedKFold`` shuffle seed, so the partition is reproducible.
     """
     _, counts = np.unique(np.asarray(y), return_counts=True)
     if counts.min() < n_splits:
@@ -237,17 +185,16 @@ def cv_splits(X, y, n_splits=CV_FOLDS, seed=SEED):
 # Fold persistence
 # ---------------------------------------------------------------------------
 
-# results/<dataset>_folds.csv schema (task 7): one row per account that
-# landed in a test fold for a given (cutoff, target). A (cutoff, target)
-# pair with too few positives for cv_splits simply has no rows here --
-# consumers should treat a missing pair as "not CV-partitioned", not as a
+# results/<dataset>_folds.csv schema: one row per account that landed in a
+# test fold for a given (cutoff, target). A pair with too few positives for
+# cv_splits has no rows here, which means "not CV-partitioned" rather than a
 # fold of 0.
 FOLDS_COLUMNS = ["account", "cutoff", "target", "fold"]
 
 
 def write_folds(records, dataset, results_dir="results"):
-    """Persist the fold partition once, so later models (task 1's GraphSAGE)
-    read it instead of re-deriving it."""
+    """Persist the fold partition, so later models read it instead of
+    re-deriving it."""
     path = f"{results_dir}/{dataset}_folds.csv"
     pd.DataFrame(records, columns=FOLDS_COLUMNS).to_csv(path, index=False)
     return path
@@ -261,14 +208,12 @@ def folds_path(dataset, results_dir="results"):
 def read_folds(dataset, results_dir="results"):
     """The persisted partition for ``dataset``, or ``None`` if there is none.
 
-    Returning ``None`` rather than raising is deliberate: a consumer of the
-    folds is expected to have a sensible un-folded mode. The synthetic
-    datasets are never CV-partitioned at all (task 7 scopes CV to the IBM
-    data), and an IBM run made with ``N_FOLDS = 0`` writes no partition
-    either -- in both cases the right behaviour is to evaluate the full
-    population and say so, not to fail. Callers that genuinely cannot
-    proceed without folds (scripts/graphsage_baseline.py) should check for
-    ``None`` and raise their own message naming how to produce the file.
+    ``None`` rather than an exception: CV is scoped to the IBM data, so the
+    synthetic datasets are never partitioned, and an IBM run made with
+    ``N_FOLDS = 0`` writes no partition either. In both cases the caller
+    evaluates the full population instead. Callers that cannot proceed
+    without folds (scripts/graphsage_baseline.py) check for ``None``
+    themselves.
     """
     path = folds_path(dataset, results_dir)
     if not os.path.exists(path):
@@ -279,9 +224,8 @@ def read_folds(dataset, results_dir="results"):
 def fold_assignments(folds_df, cutoff, target):
     """``{fold: [account, ...]}`` for one (cut-off, target) cell.
 
-    Empty when the partition has no rows for that pair -- task 7 skips a
-    cell whose positives are too few for ``cv_splits``, so a missing pair
-    means "not CV-partitioned", not "a fold of zero accounts".
+    Empty when the partition has no rows for that pair, which means "not
+    CV-partitioned" rather than "a fold of zero accounts".
     """
     if folds_df is None:
         return {}
@@ -297,8 +241,8 @@ def is_outlier_detector(clf):
     """True for sklearn outlier/density estimators such as IsolationForest.
 
     They score anomalies *low*, the opposite of every classifier here, so
-    their scores have to be negated before ranking. Checked two ways
-    because ``_estimator_type`` is on its way out of sklearn.
+    their scores are negated before ranking. Checked two ways, since
+    ``_estimator_type`` is deprecated in recent sklearn.
     """
     if getattr(clf, "_estimator_type", None) == "outlier_detector":
         return True
@@ -308,15 +252,11 @@ def is_outlier_detector(clf):
 def model_scores(clf, X):
     """Continuous ranking score for ``X``; higher means more suspicious.
 
-    Covers the three estimator interfaces used in this repo: ``predict_proba``
-    (tree, boosting), ``decision_function``, and ``score_samples``
-    (isolation forest).
-
-    Outlier detectors are handled *before* ``decision_function``, because
-    ``IsolationForest`` exposes both and its ``decision_function`` is high
-    for normal points -- taking it would silently rank the most ordinary
-    accounts first. ``gargaml_IF.py`` already negates by hand for the same
-    reason.
+    Covers the three estimator interfaces used here: ``predict_proba`` (tree,
+    boosting), ``decision_function``, and ``score_samples`` (isolation
+    forest). Outlier detectors are matched *before* ``decision_function``,
+    because ``IsolationForest`` exposes both and its ``decision_function`` is
+    high for normal points, which would rank the most ordinary accounts first.
     """
     if hasattr(clf, "predict_proba") and not is_outlier_detector(clf):
         proba = clf.predict_proba(X)
@@ -375,19 +315,14 @@ def ranking_metrics(y_true, y_score, alert_sizes=ALERT_SIZES):
     """Precision@K, Recall@K, lift@K, #TP@K and the tie diagnostic.
 
     ``lift@K`` is Precision@K over the prevalence of the evaluated
-    population -- the same *ratio* as ``lift_curve_values`` in
-    scripts/distribution_scores.py, but a different *population*: that
+    population. It is the same *ratio* as ``lift_curve_values`` in
+    scripts/distribution_scores.py but over a different *population*: that
     function takes the tie-inclusive superset at the cut value
-    (``Pred >= data_value``), while this one takes exactly the top ``K``
-    rows after a stable sort. On the tied plateaus a decision tree
-    produces, the two numbers diverge substantially (verified: >10x on a
-    6-leaf tree score), so they are not interchangeable. Exactly-``K`` is
-    the right population *here*: the point is sizing a fixed-size alert
-    queue (see module docstring), and ``lift_curve_values`` is answering a
-    different question (a continuous curve over fractions). ``ties@K``
-    flags when the top-``K`` set was arbitrary within a tie, which is
-    exactly when the two definitions would disagree most. Recall@K and
-    lift@K are NaN when there are no positives.
+    (``Pred >= data_value``), this one exactly the top ``K`` rows after a
+    stable sort, and on the tied plateaus a decision tree produces the two
+    diverge substantially. Exactly-``K`` is the population for sizing a
+    fixed alert queue; ``ties@K`` flags when the top-``K`` set was arbitrary
+    within a tie. Recall@K and lift@K are NaN when there are no positives.
     """
     y_true = np.asarray(y_true).astype(int)
     y_score = np.asarray(y_score, dtype=float)
@@ -423,13 +358,11 @@ def evaluate_scores(y_true, y_score, y_pred=None, alert_sizes=ALERT_SIZES):
     precision and F1. Pass the model's own ``predict`` output as
     ``y_pred`` when one exists (:func:`evaluate_model` always does).
 
-    When there is no natural 0/1 prediction -- the raw GARG-AML score
-    (range [-1, 1]), an isolation forest's ``-score_samples``
-    (~[0.35, 0.60], no operating point chosen at 0.5) -- ``precision`` and
-    ``f1`` are reported as NaN rather than invented at an arbitrary 0.5
-    cut: thresholding those scales at 0.5 would silently fabricate a
-    number and write it into the same published column as a real
-    ``clf.predict()`` result.
+    When there is no natural 0/1 prediction -- the raw GARG-AML score (range
+    [-1, 1]), an isolation forest's ``-score_samples`` -- ``precision`` and
+    ``f1`` are NaN rather than invented at an arbitrary 0.5 cut, which would
+    write a fabricated number into the same column as a real ``predict``
+    result.
     """
     if y_pred is None:
         precision = f1 = np.nan
@@ -450,8 +383,8 @@ def evaluate_scores(y_true, y_score, y_pred=None, alert_sizes=ALERT_SIZES):
 def evaluate_model(clf, X_test, y_test, alert_sizes=ALERT_SIZES):
     """Fit-free evaluation of ``clf`` on the test split.
 
-    Returns a **dict** keyed by metric name -- not the 4-tuple the scripts
-    used to unpack, so that adding a metric never touches a call site.
+    Returns a dict keyed by metric name, so adding a metric never touches a
+    call site.
     """
     y_score = model_scores(clf, X_test)
     y_pred = clf.predict(X_test)
@@ -461,9 +394,8 @@ def evaluate_model(clf, X_test, y_test, alert_sizes=ALERT_SIZES):
 def nan_metrics(alert_sizes=ALERT_SIZES):
     """Metric dict of NaNs for a cell that could not be evaluated.
 
-    Cells with too few positives have always been reported as gaps rather
-    than dropped; this keeps that behaviour explicit instead of relying on
-    a zero-filled matrix.
+    A cell with too few positives to fit is reported as a gap rather than
+    dropped or zero-filled.
     """
     return {name: np.nan for name in metric_names(alert_sizes)}
 
@@ -501,13 +433,11 @@ def metric_records(metrics, status="ok", n_test=np.nan, n_pos=np.nan, **context)
 def metrics_frame(records):
     """Tidy DataFrame from the record list, with a stable column order.
 
-    ``fold`` (task 7) is guaranteed to exist even when *no* record in this
-    batch passed one -- pandas only fills a column with NaN for rows that
-    are missing a key some other row *did* supply; if every row omits it
-    (a single-split caller, e.g. the synthetic scripts, gargaml_IF.py, or
-    gargaml_tree.py itself in its N_FOLDS=0 mode), the column would not be
-    created at all, and callers that assume it always exists (e.g.
-    write_metric_matrices's ``fold == -1`` check) would raise ``KeyError``.
+    ``fold`` is guaranteed to exist even when no record in the batch passes
+    one: pandas creates a NaN column only for rows missing a key some other
+    row supplied, so a batch from a single-split caller would otherwise have
+    no such column and callers that assume one (write_metric_matrices's
+    ``fold == -1`` check) would raise ``KeyError``.
     """
     df = pd.DataFrame(records)
     if "fold" not in df.columns:
@@ -521,12 +451,11 @@ def metrics_frame(records):
 # ---------------------------------------------------------------------------
 
 def _matrix(df, index_order, column_order, aggfunc="mean"):
-    """Pivot one metric into the historical cut-off x pattern matrix.
+    """Pivot one metric into the cut-off x pattern matrix.
 
-    ``aggfunc`` is "mean" for the historical file and "std" for its task-7
-    companion; with exactly one row per (cutoff, target) cell -- true for
-    every single-split caller -- both aggregations are no-ops on a single
-    value, so this stays byte-identical to the pre-task-7 behaviour there.
+    ``aggfunc`` is "mean" for the matrix itself and "std" for its companion;
+    with one row per (cutoff, target) cell, as every single-split caller has,
+    both are no-ops on a single value.
     """
     matrix = df.pivot_table(
         index="cutoff", columns="target", values="value", dropna=False, aggfunc=aggfunc
@@ -539,24 +468,19 @@ def _matrix(df, index_order, column_order, aggfunc="mean"):
 
 def write_metric_matrices(long_df, dataset, str_directed, suffix="",
                           results_dir="results", write_std=False):
-    """Reproduce the historical per-metric result files from tidy records.
+    """Write the per-metric result files from tidy records.
 
-    Emits ``<dataset>_<metric>_<model>_<direction><suffix>_combined.csv``
-    for each of :data:`LEGACY_METRICS` and each model, plus the
-    model-independent ``<dataset>_imbalance_<direction><suffix>_combined.csv``.
-    Layout, ordering and NaN gaps match what the pipeline wrote before, so
-    notebooks reading these files need no changes.
+    Emits ``<dataset>_<metric>_<model>_<direction><suffix>_combined.csv`` for
+    each of :data:`LEGACY_METRICS` and each model, plus the model-independent
+    ``<dataset>_imbalance_<direction><suffix>_combined.csv``. A cell the
+    models could not be fitted on stays a NaN gap.
 
-    Pooled out-of-fold rows (``fold == -1``, task 7) are always excluded
-    before pivoting, unconditionally: a fold column may exist with no ``-1``
-    rows in it (a single-split caller has none), but if it does, averaging
-    it in with the per-fold rows would silently corrupt the historical mean
-    with a sixth, differently-computed value.
+    Pooled out-of-fold rows (``fold == -1``) are always excluded before
+    pivoting: averaging them in with the per-fold rows would mix a sixth,
+    differently-computed value into the mean.
 
-    When ``write_std=True`` (task 7's CV runs), also writes
-    ``..._std_combined.csv`` companions with ``aggfunc="std"`` -- same
-    shape, so figures can gain error bars. Default ``False`` keeps every
-    single-split caller's output untouched.
+    ``write_std=True`` also writes ``..._std_combined.csv`` companions with
+    ``aggfunc="std"``, same shape, so figures can gain error bars.
     """
     if "fold" in long_df.columns:
         long_df = long_df[long_df["fold"] != -1]
@@ -599,22 +523,17 @@ def write_metric_matrices(long_df, dataset, str_directed, suffix="",
 
 def write_metrics(records, dataset, str_directed, suffix="", results_dir="results",
                    write_std=False, write_matrices=True):
-    """Write the tidy CSV *and* the historical matrices. Returns the frame.
+    """Write the tidy CSV *and* the per-metric matrices. Returns the frame.
 
-    One call at the end of a script replaces the block of per-matrix
-    ``to_csv`` lines each of them used to carry. ``write_std`` is task 7's
-    switch for also emitting the fold-std companion matrices; see
+    ``write_std`` also emits the fold-std companion matrices; see
     :func:`write_metric_matrices`.
 
-    ``write_matrices=False`` writes the tidy frame only. It exists for a
-    caller whose model has **no** historical matrix format to reproduce --
-    the base GARG-AML score in scripts/distribution_scores.py, whose
-    published numbers live in ``results_performance_IBM_<direction>.txt``
-    instead. Emitting matrices there would create files no notebook opens,
-    which is exactly what :data:`LEGACY_MODEL_TOKENS` raises to prevent.
-    It also sidesteps a real hazard: that caller mixes per-fold rows with a
-    full-population row, and ``_matrix``'s ``aggfunc="mean"`` would silently
-    average the two kinds together into one cell.
+    ``write_matrices=False`` writes the tidy frame only. It is for a caller
+    whose model has no matrix format to reproduce -- the base GARG-AML score
+    in scripts/distribution_scores.py, whose numbers live in
+    ``results_performance_IBM_<direction>.txt``. That caller also mixes
+    per-fold rows with a full-population row, which ``_matrix``'s
+    ``aggfunc="mean"`` would average together into one cell.
     """
     long_df = metrics_frame(records)
 
@@ -635,15 +554,13 @@ def write_metrics(records, dataset, str_directed, suffix="", results_dir="result
 
 
 def aggregate_folds(long_df):
-    """Mean/std/min/max across CV folds, plus ``n_folds_ok`` (task 7).
+    """Mean/std/min/max across CV folds, plus ``n_folds_ok``.
 
-    Grouped on the identifying columns other than ``fold``/``seed``/
-    ``n_test``/``n_pos``/``status``, over rows with ``fold >= 0`` only --
-    this excludes both NaN (single-split) rows and the ``-1`` pooled
-    out-of-fold row, so a pooled value never gets averaged in as a sixth
-    fold. ``n_folds_ok`` counts folds with ``status == "ok"``, not folds
-    present, so a cutoff/target cell where only 3 of 5 folds had enough
-    positives to fit announces that rather than silently averaging 3
+    Over rows with ``fold >= 0`` only, which excludes both NaN (single-split)
+    rows and the ``-1`` pooled out-of-fold row, so a pooled value is never
+    averaged in as an extra fold. ``n_folds_ok`` counts folds with
+    ``status == "ok"``, not folds present, so a cell where only 3 of 5 folds
+    had enough positives to fit announces that rather than averaging 3
     numbers as if nothing were missing.
     """
     keys = ["dataset", "direction", "model", "features", "cutoff", "target", "metric", "K"]

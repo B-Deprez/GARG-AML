@@ -1,8 +1,9 @@
-# LOAD MODULES
-# Standard library
 import pandas as pd
 
 def main(split=True):
+    # LI-Large does not fit in memory on the machines the pipeline runs on:
+    # split=True cuts the transactions file into k pieces, split=False puts
+    # them back together into a single normalised file.
     k=30
 
     dtype_dict = {
@@ -15,7 +16,7 @@ def main(split=True):
     if split:
         full_data_set = pd.read_csv("data/LI-Large_Trans.csv", dtype = dtype_dict)
 
-        n = int(len(full_data_set)/k) # We devide the dataset in k parts
+        n = int(len(full_data_set)/k) # rows per piece
         for i in range(k):
             if i == k-1:
                 full_data_set.iloc[i*n:].to_csv("data/LI-Large_Trans_"+str(i)+".csv", index=False)

@@ -49,77 +49,28 @@ from sklearn import ensemble
 
 from pickle import dump
 
-# The label cut-offs and the pattern targets are swept identically by every
-# feature config, so they live here rather than being re-declared per config.
-# Task 5: an entry is either a plain dataset (the full graph, as published)
-# or a single-bank view "<dataset>_bank<b>". A view reads the same
-# data/<dataset>_Trans.csv but keeps only the transactions booked at bank b,
-# reads its own results/<dataset>_bank<b>_GARGAML_*.csv measures (run the
-# measure scripts on the view first) and writes its own result files. Choose
-# the banks with notebooks/BankObservability.ipynb.
-# Task 5 partial-observability views, selected by notebooks/BankObservability.ipynb:
-#   012      the largest bank by clients -- 0.512% of all accounts, 1.958% of
-#            all transactions
-#   top50    the 50 largest banks pooled into one institution -- 10.8% of
-#            accounts, 31.4% of transactions, which is the realistic size of a
-#            large bank and the only setting with enough positives to evaluate
-# The appendix comparison itself is scripts/partial_observability.py; these
-# entries exist for running the ordinary tree/boosting pipeline on a view.
-#
-# Ordered smallest first, matching gargaml_undirected.py / gargaml_directed.py:
-# 12,180 nodes for bank 012, 164,822 for top50, 515,080 for HI-Small,
-# 2,054,390 for LI-Large. Every entry OVERWRITES its results/ files in place,
-# and a dataset whose stage-1 measures are missing is skipped rather than
-# failing (see available_directions), so an interrupted or trimmed run still
-# leaves a usable results/. Comment out what you do not need.
-#
-# LI-Large is the multi-hour job and needs the VSC envelope (16 h, 200 GB):
-# reduced_graph() builds a 2M-node / 176M-edge NetworkX graph and runs Louvain
-# on it before a single model is fitted. It is in this list because Tables
-# 10-11 have an LI-Large column: leaving it out would publish HI-Small under
-# task 7's 5-fold CV beside LI-Large numbers still coming from the original
-# single 70/30 split *and* from before task 2's predict_proba fix, which is a
-# table whose two halves are not the same quantity.
-#
-# Task 4 (R2-M3): the Louvain sensitivity sweep. The setting rides in the
-# dataset name -- "_res<r>" for a resolution, "_nolouvain" for no reduction at
-# all -- so each arm writes its own measures and a bare name keeps the
-# published resolution of 10. See src/utils/graph_processing.parse_resolution.
-#
-# Cost: HI-Small stage 1 is ~5 min per direction at resolution 10, so the four
-# extra resolutions add ~20 min. The **no-Louvain arms are a different order of
-# magnitude**, not a slower version of the same thing: the reduction is what
-# keeps a second-order ego graph small, and without it HI-Small's reach ~14,900
-# accounts, each of which GARG_AML_node_*_measures densifies with
-# nx.adjacency_matrix(...).toarray() -- roughly 1.8 GB for one node (measured
-# while building task 5's appendix). They are listed last and deliberately:
-# expect LI-Large_nolouvain to be infeasible rather than slow, and record that
-# outcome, because "what the pre-processing buys" is exactly what R2-M3 asks.
+# Datasets to run, smallest first: a plain name is the full graph, "_bank<b>"
+# / "_banktop<k>" a single-institution view, "_res<r>" a Louvain resolution and
+# "_nolouvain" no reduction at all (see src/utils/graph_processing). Each entry
+# overwrites its own result files in place, and one whose stage-1 measures are
+# missing is skipped rather than failing, so entries can be commented out
+# freely. LI-Large and the no-Louvain arms are the expensive runs.
 DATASETS = ["HI-Small_bank012", "HI-Small_banktop50",
             "HI-Small_res1", "HI-Small_res5",
-            "HI-Small",                        # the published setting, res 10
+            "HI-Small",                        # default resolution, 10
             "HI-Small_res20", "HI-Small_res50",
             "LI-Large",
-            # No-Louvain arms last -- see the note above.
             "HI-Small_nolouvain", "LI-Large_nolouvain"]
 
-# The default sweep: every cut-off and every pattern. The cut-offs come from
-# src/utils/evaluation.py rather than being declared here -- one canonical
-# list, imported by every script that sweeps labels. It now starts at 0.0
-# ("involved in at least one laundering transaction"), so this grid is 6
-# cut-offs wide, not the published 5, and every result file written before
-# that lacks the 0.0 row.
+# The pattern targets swept for every dataset and feature config. The matching
+# label cut-offs come from src/utils/evaluation.py rather than being declared
+# here: one canonical list, imported by every script that sweeps labels.
 TARGET_COLUMNS = ['Is Laundering', 'FAN-OUT', 'FAN-IN', 'GATHER-SCATTER', 'SCATTER-GATHER', 'CYCLE', 'RANDOM', 'BIPARTITE', 'STACK']
 
 # Per-dataset reductions of that sweep, keyed by the *underlying* dataset so a
-# task-5 view inherits its base's settings (same idiom as the DATASETS dict in
-# graphsage_baseline.py). This is the sanctioned, logged place for task 7's
-# LI-Large reduction -- the full grid is 6 cut-offs x 9 targets x 2 models x 4
-# feature configs = 432 fits, and 2160 under 5-fold CV, which LI-Large will not
-# carry. Restricting it to the headline cut-offs (0.0 / 0.1 / 0.5 / 0.9)
-# matches what graphsage_baseline.py already does there, so the two models stay
-# comparable cell for cell. Record a reduction here rather than trimming the
-# module constants, which would silently shrink HI-Small's grid too.
+# bank view inherits its base's settings. LI-Large runs the headline cut-offs
+# only, matching what scripts/graphsage_baseline.py does there so the two
+# models stay comparable cell for cell.
 DATASET_SETTINGS = {
     "LI-Large": dict(cut_offs=HEADLINE_CUTOFFS),
 }
@@ -128,32 +79,26 @@ DATASET_SETTINGS = {
 def dataset_settings(dataset):
     """The (cut_offs, targets) sweep for ``dataset``; see DATASET_SETTINGS.
 
-    Falls back to the full default sweep, and resolves a task-5 view
+    Falls back to the full default sweep, and resolves a bank view
     ("HI-Small_bank012") to its base dataset's entry.
     """
     overrides = DATASET_SETTINGS.get(parse_view(dataset)[0], {})
     return (overrides.get("cut_offs", CUT_OFFS),
             overrides.get("targets", TARGET_COLUMNS))
 
-# Task 7: set to 0 to reproduce the original published single 70/30 split
-# (Tables 10-11) -- holdout_split, one fit per model, no fold column, legacy
-# files unchanged. Set to 5 (or any >=2) to run 5-fold stratified CV instead:
-# cv_splits, a pooled out-of-fold pass per model, and the fold-std companion
-# matrices. Both modes write to the same legacy filenames, so switching this
-# and rerunning overwrites the other mode's output -- copy results/ aside
-# first if you want to keep both on disk at once.
+# 0 = a single 70/30 stratified holdout: holdout_split, one fit per model, no
+# fold column. >=2 = that many stratified folds: cv_splits, a pooled
+# out-of-fold pass per model, and the fold-std companion matrices. Both modes
+# write the same filenames, so switching this and rerunning overwrites the
+# other mode's output -- copy results/ aside to keep both on disk at once.
 N_FOLDS = 5
 
 # Slurm overrides; the constants above remain the documented defaults.
-# GARGAML_N_FOLDS=2 is the cheap verification setting (CLAUDE.md s2) and is
-# what a GraphSAGE test run should regenerate the fold partition with.
 DATASETS = select_datasets(DATASETS)
 N_FOLDS = env_override("n_folds", N_FOLDS, int)
 RESULTS_DIR = resolve_results_dir()
 
-# Defaults for gargaml_tree/gargaml_boosting's own save_path -- no caller in
-# this file passes save=True today, but the default must still land under
-# RESULTS_DIR rather than a hardcoded "results/" if one ever does.
+# Defaults for gargaml_tree/gargaml_boosting's own save_path, under RESULTS_DIR.
 DEFAULT_TREE_SAVE_PATH = RESULTS_DIR+"/model_tree.pkl"
 DEFAULT_BOOST_SAVE_PATH = RESULTS_DIR+"/model_boosting.pkl"
 
@@ -161,11 +106,7 @@ def gargaml_tree(X, y, save = False, save_path = None):
     save_path = save_path or DEFAULT_TREE_SAVE_PATH
     # random_state is required, not cosmetic: sklearn permutes features at every
     # split, so when two splits tie on the criterion the winner is drawn at
-    # random and an unseeded tree is not reproducible run to run. This script
-    # was the only one missing it (the synthetic scripts always passed 1997),
-    # which is why re-running it moved cells that no code change should touch.
-    # Task 3's ablation and task 7's fold variance both compare tree runs, so
-    # unseeded tie-breaking would show up as signal in both.
+    # random and an unseeded tree is not reproducible run to run.
     clf = tree.DecisionTreeClassifier(min_samples_leaf=10, random_state=1997)
     clf = clf.fit(X, y)
 
@@ -195,30 +136,26 @@ def available_directions(dataset):
 
     This script is stage 2 of a decoupled pipeline: it reads what
     gargaml_directed.py / gargaml_undirected.py wrote. A dataset listed in
-    DATASETS whose measures were never computed -- a task-5 bank view is the
-    usual case, since the measure scripts have to be run on the view name
-    first -- would otherwise take down the whole loop with a bare
-    FileNotFoundError, after the graph had been built and Louvain run, and
-    after the hyperparameter file for it had already been written. Report the
-    gap and carry on with the datasets that are ready instead.
+    DATASETS whose measures were never computed -- a bank view is the usual
+    case, since the measure scripts have to be run on the view name first --
+    is reported and skipped, so the loop carries on with the datasets that
+    are ready.
     """
     return [d for d in [False, True] if os.path.exists(measures_path(dataset, d))]
 
 def reduced_graph(dataset):
     """The Louvain-reduced graph the neighbourhood summaries are computed on.
 
-    Built from the **undirected** transaction graph whichever measures CSV
-    is being scored, so it is identical across the directed and undirected
-    passes -- build it once in the caller and hand it to both. Graph
-    construction plus Louvain is where this script's run time goes; the
-    model fits are cheap next to it.
+    Built from the undirected transaction graph whichever measures CSV is
+    being scored, so it is identical across the directed and undirected
+    passes -- build it once in the caller and hand it to both.
     """
-    base, banks = parse_view(dataset)  # task 5: None for the full graph
+    base, banks = parse_view(dataset)  # None for the full graph
     G = construct_IBM_graph(path = trans_path(dataset), directed = False, banks = banks)
-    # Task 4: same Louvain setting stage 1 used, read back out of the dataset
-    # name, so the neighbourhood features match the measures they are joined
-    # to. dataset is not passed on: stage 1 already logged the severance and
-    # this would duplicate the row.
+    # Same Louvain setting stage 1 used, read back out of the dataset name, so
+    # the neighbourhood features match the measures they are joined to. dataset
+    # is not passed on: stage 1 already logged the severance and this would
+    # duplicate the row.
     return reduce_graph(G, parse_resolution(dataset)[1], results_dir=RESULTS_DIR)
 
 def data_preparation(dataset, feature_cols, directed, score_type, G_reduced = None):
@@ -226,15 +163,14 @@ def data_preparation(dataset, feature_cols, directed, score_type, G_reduced = No
 
     ``feature_cols`` is the *union* over the feature configs that will be
     run (see src/utils/features.py), so the graph is built and Louvain is
-    run once for all of them -- that is where the run time of this script
-    goes, not in the model fits.
+    run once for all of them.
 
     Pass ``G_reduced`` to reuse a graph already built by :func:`reduced_graph`
     (it does not depend on ``directed``); leave it ``None`` to build on
     demand, which is what a single-config caller wants.
     """
     str_directed = "directed" if directed else "undirected"
-    base, banks = parse_view(dataset) #task 5: None for the full graph
+    base, banks = parse_view(dataset) #None for the full graph
     # Expand a group spec ("top50") into its member banks before anything
     # filters on it: bank_clients matches against the bank column and would
     # otherwise select nobody. resolve_banks caches per (path, spec).
@@ -247,8 +183,7 @@ def data_preparation(dataset, feature_cols, directed, score_type, G_reduced = No
     # Group (b) is already in the measures frame, so carrying the block
     # densities and sizes costs one join rather than a second read. Group
     # membership decides which columns come from here, not what the CSV
-    # happens to be called: a new measure column must not silently bypass
-    # the neighbourhood summary below.
+    # happens to be called.
     block_columns = [c for c in feature_cols if c in feature_groups(directed)["b"]]
     if block_columns:
         results_df = results_df.join(results_df_measures.set_index("node")[block_columns])
@@ -271,13 +206,13 @@ def data_preparation(dataset, feature_cols, directed, score_type, G_reduced = No
     laundering_combined, _, _ = summarise_ML_labels(transactions_df_extended,pattern_columns)
 
     if banks is not None:
-        # Task 5: a bank alerts on its own customers, so they are the
-        # evaluated population -- not the external counterparties, which stay
-        # in the graph as neighbours but are not scored. This also keeps the
-        # labels honest: a bank sees every transaction of its own clients, so
-        # their propensities here equal the full-data ones and the view-vs-full
-        # comparison varies only the features. Restricting before
-        # combine_patterns_GARGAML also spares it the dropped accounts.
+        # A bank alerts on its own customers, so they are the evaluated
+        # population -- not the external counterparties, which stay in the
+        # graph as neighbours but are not scored. This also keeps the labels
+        # honest: a bank sees every transaction of its own clients, so their
+        # propensities here equal the full-data ones and only the features
+        # differ. Restricting before combine_patterns_GARGAML also spares it
+        # the dropped accounts.
         clients = bank_clients(transactions_df_extended, banks)
         laundering_combined = laundering_combined[laundering_combined.index.isin(clients)]
         print("  bank view: "+str(len(laundering_combined))+" client accounts evaluated")
@@ -292,11 +227,10 @@ def data_preparation(dataset, feature_cols, directed, score_type, G_reduced = No
 def _fit_and_record(X_train, y_train, X_test, y_test, models, context):
     """Fit every model on one train/test partition and return its records.
 
-    Shared by both of run_config's modes (task 7): the single 70/30 split
-    (N_FOLDS=0) calls this once per (cutoff, target); 5-fold CV calls it once
-    per fold. Also returns each model's test-set scores/predictions, indexed
-    by account -- needed to pool the CV folds into one out-of-fold pass,
-    harmlessly unused (but cheap) when N_FOLDS=0.
+    Shared by both of run_config's modes: the single 70/30 split (N_FOLDS=0)
+    calls this once per (cutoff, target); cross-validation calls it once per
+    fold. Also returns each model's test-set scores/predictions, indexed by
+    account, which is what pools the CV folds into one out-of-fold pass.
     """
     n_test = len(y_test)
     n_pos = int(y_test.sum())
@@ -326,7 +260,7 @@ def _fit_and_record(X_train, y_train, X_test, y_test, models, context):
 
 
 def write_fold_partition(laundering_combined, dataset, cut_offs, targets, n_splits, seed=SEED):
-    """Persist the N_FOLDS partition once (task 7).
+    """Persist the N_FOLDS partition once.
 
     The split for a given (cutoff, target) depends only on the label vector,
     ``n_splits`` and the seed -- not on which feature config or direction
@@ -353,12 +287,12 @@ def write_fold_partition(laundering_combined, dataset, cut_offs, targets, n_spli
 
 def run_config(laundering_combined, dataset, directed, config, seed=SEED,
                cut_offs=None, targets=None):
-    """Train and evaluate both models on one feature config (task 3).
+    """Train and evaluate both models on one feature config.
 
     The feature config is the only thing that varies: the split, the
     cut-off/target sweep and the estimators are identical, which is what
     makes the ablation readable. Results go to the ``config``-specific
-    suffix, so the published ``full`` files keep their historical names.
+    suffix, and ``full`` writes the unsuffixed filenames.
 
     ``cut_offs`` / ``targets`` default to whatever
     :func:`dataset_settings` resolves for ``dataset``, so a caller that
@@ -380,7 +314,7 @@ def run_config(laundering_combined, dataset, directed, config, seed=SEED,
           +(" (reduced; see DATASET_SETTINGS)"
             if (cut_offs, targets) != (CUT_OFFS, TARGET_COLUMNS) else ""))
 
-    # Persist the feature schema for the appendix (task 10).
+    # Persist the exact features the models see, for the appendix.
     schema_path = RESULTS_DIR+"/"+dataset+"_"+str_directed+suffix+"_feature_schema.csv"
     feature_schema(config, directed).to_csv(schema_path, index=False)
     print("  feature schema -> "+schema_path)
@@ -394,25 +328,23 @@ def run_config(laundering_combined, dataset, directed, config, seed=SEED,
 
     # Iterate the *full* default grid and skip what this dataset's sweep
     # leaves out, rather than iterating the reduced sweep directly. Two
-    # reasons, both about the legacy matrices:
+    # reasons, both about the metric matrices:
     #   * write_metric_matrices takes its row/column order from the values
-    #     actually present, so a reduced sweep would emit a 3x9 matrix where
-    #     every other dataset emits 5x9 -- and VisualisationResults.ipynb
-    #     indexes those files with df.loc[cut_off][pattern] over the full
-    #     cut-off list, so the missing rows would be a KeyError, not a
-    #     smaller table.
-    #   * a cell that was never attempted is a gap like any other, and this
-    #     repo reports gaps instead of dropping them. It goes through the
-    #     same nan_metrics() path as a too-few-positives cell, with a status
-    #     that says which of the two it was.
+    #     actually present, and VisualisationResults.ipynb indexes those
+    #     files with df.loc[cut_off][pattern] over the full cut-off list, so
+    #     a reduced sweep is a KeyError there, not a smaller table.
+    #   * a cell that was never attempted is a gap like any other, and gaps
+    #     are reported rather than dropped. It goes through the same
+    #     nan_metrics() path as a too-few-positives cell, with a status that
+    #     says which of the two it was.
     for cutoff in CUT_OFFS:
         for target in TARGET_COLUMNS:
             context = dict(
                 dataset = dataset,
                 direction = str_directed,
-                features = config, # which task-3 column groups the models see;
-                                    # see src/utils/features.py for what each config holds
-                                    # and why "full" is not literally all four groups
+                features = config, # which column groups the models see; see
+                                    # src/utils/features.py for what each config
+                                    # holds
                 cutoff = cutoff,
                 target = target,
                 seed = seed,
@@ -433,7 +365,7 @@ def run_config(laundering_combined, dataset, directed, config, seed=SEED,
             X_df = laundering_combined[gargaml_columns]
             y = (laundering_combined[target] > cutoff).astype(int)
 
-            if N_FOLDS == 0: # original published setup: single 70/30 split
+            if N_FOLDS == 0: # single 70/30 stratified holdout
                 try:
                     X_train, X_test, y_train, y_test = holdout_split(X_df, y, seed=seed)
                 except Exception as exc: # Too few labels to even split: no models for this cell
@@ -447,7 +379,7 @@ def run_config(laundering_combined, dataset, directed, config, seed=SEED,
                 records += fold_records
                 continue
 
-            # Task 7: 5-fold (or N_FOLDS-fold) stratified CV instead.
+            # N_FOLDS-fold stratified cross-validation instead.
             try:
                 splits = cv_splits(X_df, y, n_splits=N_FOLDS, seed=seed)
             except ValueError as exc: # Too few positives for N_FOLDS-fold CV
@@ -474,9 +406,8 @@ def run_config(laundering_combined, dataset, directed, config, seed=SEED,
                         oof_preds[model_key].loc[X_test.index] = preds[model_key]
 
             # Pooled out-of-fold pass (fold=-1): one row per model, ranked over
-            # the whole population -- the alert-queue headline numbers task 2's
-            # ranking metrics actually want, not a 20% slice (see task 7's "K
-            # population" note).
+            # the whole population rather than a single fold's slice, which is
+            # the population the alert-queue ranking metrics are defined on.
             pooled_context = dict(context, fold=-1)
             for model_key, _ in models:
                 scores, preds = oof_scores[model_key], oof_preds[model_key]
@@ -501,7 +432,7 @@ def main():
 def run_dataset(dataset):
     score_type = "weighted_average"
 
-    configs = list(FEATURE_CONFIGS) # full (published), blocks, topology, all
+    configs = list(FEATURE_CONFIGS) # full, blocks, topology, all
 
     # Resolved once and threaded everywhere, so the persisted fold partition
     # covers exactly the (cutoff, target) cells that will be trained on. A
@@ -510,9 +441,8 @@ def run_dataset(dataset):
     cut_offs, targets = dataset_settings(dataset)
 
     # Stage 1 must have run on this dataset name -- including on a bank view's
-    # name, which is a dataset of its own. Check before building the graph:
-    # that plus Louvain is where this script's time goes, and there is no
-    # point paying for it only to fail on the first read.
+    # name, which is a dataset of its own. Checked before the graph is built,
+    # which is the expensive part.
     directions = available_directions(dataset)
     if not directions:
         print("\n### "+dataset+" -- SKIPPED: no block measures on disk ("
@@ -524,10 +454,10 @@ def run_dataset(dataset):
             print("\n### "+dataset+" ("+("directed" if directed else "undirected")
                   +") -- SKIPPED: "+measures_path(dataset, directed)+" not found ###")
 
-    # Task 9: record what every estimator was configured with, and that none
-    # of it was searched or selected on the test split (R1-4). Written up
-    # front rather than at the end, so an interrupted run still documents
-    # the configuration its partial results came from.
+    # Record what every estimator is configured with, and that none of it is
+    # searched or selected on the test split. Written up front rather than at
+    # the end, so an interrupted run still documents the configuration its
+    # partial results came from.
     print("hyperparameters -> "+write_hyperparameters(dataset, results_dir=RESULTS_DIR))
 
     # The reduced graph does not depend on the direction, so it is built
@@ -542,12 +472,12 @@ def run_dataset(dataset):
               "sweep' status, not dropped.")
 
     if N_FOLDS >= 2:
-        print("Transductive "+str(N_FOLDS)+"-fold CV (task 7): neighbour-score/degree "
-              "summary features are computed on the full graph before folding; the "
-              "temporal/inductive split stays deferred to discussion (R2-M6).")
+        print("Transductive "+str(N_FOLDS)+"-fold CV: neighbour-score/degree "
+              "summary features are computed on the full graph before folding, so "
+              "the evaluation is transductive rather than inductive.")
     else:
-        print("Single 70/30 holdout split (original published setup; task 7's CV is "
-              "off -- set N_FOLDS >= 2 in this script to enable it).")
+        print("Single 70/30 holdout split -- set N_FOLDS >= 2 in this script for "
+              "cross-validation instead.")
 
     done = set() # direction-free configs already run; see is_direction_free
     fold_partition_written = False

@@ -1,49 +1,39 @@
 """
-GraphSAGE baseline (task 1).
+GraphSAGE baseline.
 
-R2's largest ask: the paper argues against "black-box GNNs" while comparing
-against none. A **2-layer** GraphSAGE has the same receptive field as
-GARG-AML's second-order neighbourhood, so it is the principled baseline --
-same information, one model interpretable and O(|V|), the other needing a GPU
-and neighbour sampling. That framing is the reason for every choice below.
+A 2-layer GraphSAGE has the same receptive field as GARG-AML's second-order
+neighbourhood, which makes it the matched comparison: the same information,
+one model interpretable and O(|V|), the other needing a GPU and neighbour
+sampling.
 
-The model must **never** see GARG-AML scores, block densities or block sizes.
-Feeding them in would collapse the comparison into "GARG-AML plus a GNN",
-which answers no question anyone asked. Both feature configurations here are
-built from the raw transaction file alone.
+Features are built from the raw transaction file only: no GARG-AML score,
+block density or block size enters the model.
 
 Feature configurations
 ----------------------
-``topology`` (config A, strict parity)
-    Degree and log-degree. The spec lists four items -- in-degree,
-    out-degree, log-degree, distinct counterparties -- but on this graph they
-    collapse to two: parallel transactions between a pair are merged into one
-    edge and the primary run is undirected, so in-degree == out-degree ==
-    distinct counterparties == degree. Emitting four columns would be three
-    copies of one number wearing different labels.
+``topology`` (config A)
+    Degree and log-degree. Parallel transactions between a pair are merged
+    into one edge and the graph is undirected, so in-degree, out-degree and
+    the number of distinct counterparties all equal the degree.
 
-``attributes`` (config B, deliberately generous)
+``attributes`` (config B)
     Config A plus per-account amount, count, currency, bank and timing
-    aggregates. Deliberately generous: if GARG-AML holds up against a GNN
-    that also sees transaction amounts, that is the strongest sentence
-    available in the paper.
+    aggregates.
 
 Caching
 -------
-Three separate caches, because they have different lifetimes: the graph
-structure (identical for every run), the feature matrix (per config), and
-training checkpoints (per fold). The structure and features are what make a
-sweep affordable -- they are built once and reused across every cut-off,
-target and fold.
+Three separate caches, with different lifetimes: the graph structure
+(identical for every run), the feature matrix (per config), and training
+checkpoints (per fold). Structure and features are built once and reused
+across every cut-off, target and fold.
 
 Scale
 -----
 The ``pandas`` structure backend builds ``edge_index`` straight from the CSV
 columns without materialising a NetworkX graph, which is what makes LI-Large
-(176M edges) plausible; the ``networkx`` backend goes through
-``construct_IBM_graph`` and is kept because it shares its node universe with
-the rest of the pipeline by construction. Both are verified to produce the
-same node set and edge count on HI-Small.
+(176M edges) tractable; the ``networkx`` backend goes through
+``construct_IBM_graph`` and shares its node universe with the rest of the
+pipeline by construction. Both produce the same node set and edge count.
 """
 
 import os
@@ -68,15 +58,14 @@ from src.data.bank_views import (BANK_COLUMNS, filter_transactions,
 
 SEED = 1997
 
-# Account and bank identifiers are read as strings, matching
-# define_ML_labels: "00123" and 123 are different accounts to one and the
-# same account to the other, and the label table is joined on these values.
+# Account and bank identifiers are read as strings, matching define_ML_labels:
+# "00123" and 123 are different accounts to one and the same account to the
+# other, and the label table is joined on these values.
 ID_DTYPES = {"From Bank": str, "To Bank": str, "Account": str, "Account.1": str}
 
 TIMESTAMP_FORMAT = "%Y/%m/%d %H:%M"
 
-# Column groups per feature config. The names are the schema written for the
-# appendix (task 10), so they are part of the published output.
+# Column groups per feature config; these names form the feature schema.
 TOPOLOGY_FEATURES = ["degree", "log_degree"]
 
 ATTRIBUTE_FEATURES = [
@@ -92,9 +81,9 @@ FEATURE_CONFIGS = {
     "attributes": TOPOLOGY_FEATURES + ATTRIBUTE_FEATURES,
 }
 
-# Columns that are already counts or non-negative money amounts: log1p before
-# standardising, or a handful of hub accounts dominate every feature and the
-# z-scores of everyone else collapse into a spike at zero.
+# Counts and non-negative money amounts: log1p before standardising, or a
+# handful of hub accounts dominate every feature and the z-scores of everyone
+# else collapse into a spike at zero.
 LOG_SCALED_FEATURES = {
     "degree", "n_sent", "n_received",
     "amount_out_sum", "amount_out_mean", "amount_out_std", "amount_out_max",
@@ -117,11 +106,11 @@ def _structure_from_pandas(path, banks=None):
     """Undirected ``edge_index`` and node order, straight from the CSV.
 
     Never builds a Python graph object. On LI-Large that is the difference
-    between an int64 tensor and hundreds of millions of dict entries, and it
+    between an int64 tensor and hundreds of millions of dict entries, which
     is why this is the default backend.
 
-    ``banks`` restricts the structure to a single-bank view (task 5); the
-    bank columns are only read when one is asked for.
+    ``banks`` restricts the structure to a single-bank view; the bank columns
+    are only read when one is asked for.
     """
     usecols = ["Account", "Account.1"]
     if banks is not None:
@@ -139,8 +128,8 @@ def _structure_from_pandas(path, banks=None):
     keep = source != target  # construct_IBM_graph drops self-loops; match it
     source, target = source[keep], target[keep]
 
-    # Collapse parallel transactions, then symmetrise -- the same graph
-    # nx.Graph gives, without the intermediate object.
+    # Collapse parallel transactions, then symmetrise: the same graph nx.Graph
+    # gives, without the intermediate object.
     pairs = np.unique(np.stack([np.minimum(source, target),
                                 np.maximum(source, target)], axis=1), axis=0)
     edge_index = np.concatenate([pairs, pairs[:, ::-1]], axis=0).T
@@ -151,8 +140,8 @@ def _structure_from_pandas(path, banks=None):
 def _structure_from_networkx(path, banks=None):
     """Same structure via ``construct_IBM_graph``, for cross-checking."""
     G = construct_IBM_graph(path=path, directed=False, banks=banks)
-    # Captured before from_networkx: it indexes nodes in this iteration
-    # order internally, and that order is what aligns labels and folds.
+    # Captured before from_networkx: it indexes nodes in this iteration order
+    # internally, and that order is what aligns labels and folds.
     node_order = list(G.nodes())
     data = from_networkx(G)
     return data.edge_index.numpy(), node_order
@@ -162,15 +151,15 @@ def build_graph_structure(dataset, results_dir="results", backend="pandas", cach
     """Build (or load) the undirected graph structure for ``dataset``.
 
     Returns ``(edge_index, node_order, degree)``. ``node_order[i]`` is the
-    account at row ``i`` of every tensor built from this structure --
-    features, labels and fold assignments are all aligned through it.
+    account at row ``i`` of every tensor built from this structure: features,
+    labels and fold assignments are all aligned through it.
 
-    ``dataset`` may be a task-5 view name ("HI-Small_bank012"), in which case
+    ``dataset`` may be a bank view name ("HI-Small_bank012"), in which case
     the structure is built from that bank's visible transactions only and is
-    cached under the view's own name. Note that ``node_order`` then holds
-    every account in the view, including external counterparties: they carry
-    messages through the graph but are not part of the evaluated population
-    (see ``scripts/graphsage_baseline.py``).
+    cached under the view's own name. ``node_order`` then holds every account
+    in the view, including external counterparties: they carry messages
+    through the graph but are not part of the evaluated population (see
+    ``scripts/graphsage_baseline.py``).
     """
     cache_path = results_dir+"/"+dataset+"_graphsage_structure.pt"
     if cache and os.path.exists(cache_path):
@@ -259,8 +248,8 @@ class _AccountAggregator:
             side["amount_sq"] = side["amount"] ** 2
             self._accumulate_sums(role, side)
 
-        # An account's own bank is near-constant; what varies -- and what a
-        # model could plausibly use -- is the set of banks it deals *with*.
+        # An account's own bank is near-constant; what varies, and what a model
+        # can use, is the set of banks it deals *with*.
         self._accumulate_pairs("bank", pd.concat([
             pd.DataFrame({"account": chunk["Account"], "value": chunk["To Bank"]}),
             pd.DataFrame({"account": chunk["Account.1"], "value": chunk["From Bank"]}),
@@ -316,7 +305,7 @@ class _AccountAggregator:
 def build_attribute_features(dataset, node_order, chunksize=2_000_000):
     """Per-account amount/count/currency/bank/timing aggregates (config B)."""
     path = trans_path(dataset)
-    _, banks = parse_view(dataset)  # task 5: aggregate only what the bank sees
+    _, banks = parse_view(dataset)  # aggregate only what a bank view sees
     banks = resolve_banks(banks, path)
     columns = ["Timestamp", "From Bank", "Account", "To Bank", "Account.1",
                "Amount Received", "Receiving Currency", "Amount Paid",
@@ -366,10 +355,10 @@ def build_features(dataset, node_order, degree, config, results_dir="results", c
 
 
 def feature_schema(config):
-    """The exact feature matrix of ``config`` as a documented table (task 10).
+    """The exact feature matrix of ``config`` as a documented table.
 
-    Same shape as src/utils/features.py's schema, so the GNN baseline's
-    appendix row is built from the same columns as the tree models'.
+    Same shape as src/utils/features.py's schema, so the GNN baseline is
+    described in the same terms as the tree models.
     """
     check_config(config)
     kinds = {"degree": "degree", "log_degree": "degree",
@@ -393,16 +382,14 @@ def build_graph_data(dataset, config="topology", results_dir="results",
     """The PyG ``Data`` object for ``dataset`` under feature ``config``.
 
     Returns ``(data, node_order, seconds)``, where ``seconds`` is the
-    preprocessing time the scalability table reports against GARG-AML's
-    Louvain + edge-removal step.
+    preprocessing time reported in the runtime comparison, against GARG-AML's
+    Louvain and edge-removal step.
 
-    ``edge_dtype`` exists for LI-Large, where ``torch.int32`` would halve the
-    5.6 GB ``edge_index``. **Verified not to work on torch 2.3.1 /
-    torch-geometric 2.5.3**: the forward pass dies in ``scatter()`` with
-    "Expected dtype int64 for index". The parameter is kept because a newer
-    build may lift that, but the task-1 note suggesting int32 as an LI-Large
-    memory saving does not hold today -- plan for the full int64 footprint
-    and the >=64 GB host RAM that implies, and re-test before relying on it.
+    ``edge_dtype`` allows a narrower index tensor: ``torch.int32`` halves the
+    5.6 GB ``edge_index`` on LI-Large, but the scatter kernels of torch 2.3.1
+    / torch-geometric 2.5.3 require int64 indices and the forward pass fails
+    with "Expected dtype int64 for index". Plan for the int64 footprint, and
+    the >=64 GB of host RAM it implies, unless a newer build lifts that.
     """
     check_config(config)
     started = time.perf_counter()
@@ -423,9 +410,9 @@ def build_graph_data(dataset, config="topology", results_dir="results",
 # ---------------------------------------------------------------------------
 
 class GraphSAGEModel(torch.nn.Module):
-    """Plain 2-layer GraphSAGE -- the same receptive field as GARG-AML's
-    second-order neighbourhood, which is the whole point of the comparison.
-    Outputs one raw logit per node (BCEWithLogitsLoss, not a softmax)."""
+    """Plain 2-layer GraphSAGE: the same receptive field as GARG-AML's
+    second-order neighbourhood. Outputs one raw logit per node
+    (BCEWithLogitsLoss, not a softmax)."""
 
     def __init__(self, in_channels, hidden_channels=64, dropout=0.2):
         super().__init__()
@@ -443,14 +430,13 @@ class GraphSAGEModel(torch.nn.Module):
 def get_device():
     """The accelerator to train on: MPS locally, CUDA on the cluster, else CPU.
 
-    ``GARGAML_REQUIRE_GPU=1`` turns the CPU fallback into an immediate failure.
-    The Slurm GPU job sets it, because the fallback is silent: on an allocated
-    A100 a misconfigured torch burns the whole wall clock at a fraction of the
-    speed and reports fit/inference timings that are not what they claim to be.
-
-    The check asserts **CUDA specifically**, not "some accelerator". MPS is
-    preferred above and is the right answer on a Mac, but it can never be the
-    right answer on wice -- so accepting it here would defeat the guard.
+    ``GARGAML_REQUIRE_GPU=1`` turns the CPU fallback into an immediate
+    failure, which the GPU job sets because the fallback is otherwise silent:
+    a misconfigured torch burns an allocated GPU's wall clock at a fraction of
+    the speed and reports fit and inference timings that do not describe GPU
+    training. The check asserts CUDA specifically rather than any
+    accelerator; MPS is the right answer on a Mac but never on a GPU node, so
+    accepting it here would defeat the guard.
     """
     if os.environ.get("GARGAML_REQUIRE_GPU", "").strip().lower() in ("1", "true", "yes", "on"):
         if not torch.cuda.is_available():
@@ -473,9 +459,8 @@ def get_device():
 def peak_host_memory_mb():
     """Peak resident set size of this process, in MB.
 
-    ``ru_maxrss`` is bytes on macOS and kilobytes on Linux -- the runs that
-    matter happen on Linux (VSC) and the development happens on macOS, so
-    getting this wrong would misreport by 1024x on exactly one of them.
+    ``ru_maxrss`` is bytes on macOS and kilobytes on Linux, so the unit
+    depends on the platform.
     """
     usage = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     return usage / (1024 ** 2) if sys.platform == "darwin" else usage / 1024
@@ -500,12 +485,11 @@ def reset_peak_gpu_memory(device):
 def validation_split(y, train_mask, val_fraction=0.1, seed=SEED):
     """Carve a stratified validation slice out of the training fold.
 
-    The test fold is never touched: early stopping must not see it, or the
-    "same folds as the tree models" claim would be comparing a model that
-    peeked against models that did not. Returns ``(fit_mask, val_mask)``, or
-    ``(train_mask, None)`` when the fold has too few positives to stratify --
-    in which case the caller trains for a fixed number of epochs and says so
-    in the run status rather than silently early-stopping on nothing.
+    The test fold is never touched: early stopping must not see it, since the
+    folds are shared with the tree models. Returns ``(fit_mask, val_mask)``,
+    or ``(train_mask, None)`` when the fold has too few positives to
+    stratify, in which case the caller trains for a fixed number of epochs
+    and records that in the run status.
     """
     train_idx = np.flatnonzero(train_mask)
     y_train = y[train_idx]
@@ -513,9 +497,8 @@ def validation_split(y, train_mask, val_fraction=0.1, seed=SEED):
     # Enough positives that the validation slice is expected to contain at
     # least one. A stratified split of, say, 3 positives at 10% can hand back
     # a validation set with none, and average_precision_score on an
-    # all-negative slice returns 0.0 every epoch -- early stopping would then
-    # be driven by a constant, which is worse than not early stopping at all.
-    # Expect this to bite at cut-off 0.9, exactly where the tree models fail.
+    # all-negative slice returns 0.0 every epoch: early stopping would then be
+    # driven by a constant, which is worse than not early stopping at all.
     min_positives = max(2, int(np.ceil(1 / val_fraction)))
     if int(y_train.sum()) < min_positives or int((1 - y_train).sum()) < min_positives:
         return train_mask, None
@@ -536,31 +519,30 @@ def train_fold(data, train_mask, y, device, epochs=50, patience=5, hidden_channe
                resume=True, verbose=True):
     """Train one GraphSAGE model on ``train_mask``, transductively.
 
-    The loader samples neighbourhoods from the *whole* graph -- message
-    passing sees every node, train and test alike, because this pipeline is
-    transductive throughout (see CLAUDE.md). Only the seed nodes, and
-    therefore the loss, are restricted to the training fold.
+    The loader samples neighbourhoods from the *whole* graph: message passing
+    sees every node, train and test alike, because this pipeline is
+    transductive throughout. Only the seed nodes, and therefore the loss, are
+    restricted to the training fold.
 
     Early stopping is on validation **AUC-PR**, not loss: AUC-PR is the
-    paper's primary threshold-free metric, and at a 0.1% positive rate the
-    loss can improve for a long time while the ranking does not. The best
-    state by validation AUC-PR is restored before returning, so the returned
-    model is the early-stopped one rather than the last epoch's.
+    primary threshold-free metric, and at a 0.1% positive rate the loss can
+    improve for a long time while the ranking does not. The best state by
+    validation AUC-PR is restored before returning, so the returned model is
+    the early-stopped one rather than the last epoch's.
 
     ``checkpoint_path`` writes optimiser and model state every epoch and
     resumes from it, so a cluster wall-clock timeout costs one epoch rather
     than the whole run.
 
-    Returns ``(model, info)`` with the timing and stopping diagnostics the
-    scalability table needs.
+    Returns ``(model, info)`` with the timing and stopping diagnostics.
     """
     torch.manual_seed(seed)
     np.random.seed(seed)
 
     fit_mask, val_mask = validation_split(y, train_mask, val_fraction, seed)
 
-    # Reassigned in place each call rather than cloning: edge_index alone is
-    # twice HI-Small's ~5M edges, and training here is sequential.
+    # Assigned in place rather than cloning the Data object: edge_index alone
+    # is twice HI-Small's ~5M edges, and training here is sequential.
     data.y = torch.tensor(y, dtype=torch.float)
 
     loader = NeighborLoader(
@@ -578,10 +560,9 @@ def train_fold(data, train_mask, y, device, epochs=50, patience=5, hidden_channe
     pos_weight = torch.tensor([n_neg / max(n_pos, 1)], device=device)
     criterion = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight)
 
-    # What a checkpoint must agree with to be resumable. Without this, a
-    # checkpoint left behind by a short test run (or by a different
-    # hyperparameter setting) is silently resumed by the next real run, which
-    # then reports epochs it never trained under the settings it claims.
+    # What a checkpoint must agree with to be resumable: a checkpoint left by
+    # a run under different settings is otherwise resumed silently, and the
+    # run reports epochs it never trained under the settings it claims.
     signature = {"in_channels": data.num_node_features, "hidden_channels": hidden_channels,
                  "dropout": dropout, "lr": lr, "batch_size": batch_size,
                  "num_neighbors": tuple(num_neighbors), "seed": seed}
@@ -667,11 +648,11 @@ def score_all(model, data, device, batch_size=None, num_neighbors=(25, 10),
               num_workers=0):
     """Score every node.
 
-    Default is one full-graph forward pass, which is the "inference" cost the
-    scalability table reports. ``batch_size`` switches to sampled inference
-    through a NeighborLoader instead -- necessary where the full graph does
-    not fit on the device (LI-Large), and approximate for the same reason
-    training is: the neighbourhood is sampled, not complete.
+    The default is one full-graph forward pass, which is the inference cost
+    reported in the runtime comparison. ``batch_size`` switches to sampled
+    inference through a NeighborLoader instead: necessary where the full
+    graph does not fit on the device (LI-Large), and approximate for the same
+    reason training is, in that the neighbourhood is sampled, not complete.
     """
     model.eval()
 

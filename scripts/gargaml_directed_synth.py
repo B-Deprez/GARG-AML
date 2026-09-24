@@ -1,3 +1,6 @@
+# Stage 1 on the synthetic grid: per-node directed block measures, written to
+# results/<dataset>_GARGAML_directed.csv and read back by the tree scripts.
+# Run from the repository root; all paths below are root-relative.
 import os
 import sys
 import time
@@ -96,11 +99,10 @@ directed = True
 # Parallelism: use up to 4 or half of CPUs
 n_cpu = min(4, cpu_count() // 2)
 
-# Slurm overrides. The constants above stay the documented defaults: a bare
-# `python scripts/...` run behaves exactly as it always has, and an array task
-# selects its one dataset through the environment instead of editing this file.
-# n_cpu is deliberately still capped at 4 -- worker count changes the runtime
-# numbers the scalability figure reports, so it is a knob, not an auto-detect.
+# Environment overrides, for array jobs: the constants above are the defaults,
+# and a task selects its dataset and worker count through the environment
+# instead of editing this file. The worker count stays an explicit cap rather
+# than an auto-detect, since it determines the runtimes reported below.
 datasets = select_datasets(datasets)
 n_cpu = env_override("n_cpu", n_cpu, int)
 RESULTS_DIR = resolve_results_dir()
@@ -141,9 +143,8 @@ if __name__ == '__main__':
         # Log timing
         with open(f"{RESULTS_DIR}/time_results_dir.txt", "a") as f:
             f.write(f"{dataset}: {elapsed:.2f}\n")
-        # Per-task timing beside the legacy append: the shared file records only
-        # "<dataset>: <seconds>", which under an array job is both a race and
-        # unattributable afterwards. slurm/collect.slurm concatenates these.
+        # Per-task timing file beside the shared append, which is a race under
+        # an array job. slurm/collect.slurm concatenates these.
         log_timing(dataset, "directed", elapsed, n_cpu, results_dir=RESULTS_DIR)
 
         # Save DataFrame

@@ -22,16 +22,14 @@ from sklearn import ensemble
 
 RESULTS_DIR = resolve_results_dir()
 
-# This script's own established convention (see data_preparation's fillna(-1) below)
-# uses -1 for "missing", and a total training failure is reported as 0 (see
-# gargaml_tree_synthetic's except branch) -- not NaN. The result cells below are
-# serialised as repr()'d dicts inside CSV cells and parsed back with a bare eval() in
-# notebooks/VisualisationResults.ipynb, which has no `nan` name bound in scope: a single
-# stray NaN anywhere in a cell would raise inside that eval() and silently zero out the
-# real Precision/F1/AUC numbers alongside it. LEGACY_METRIC_RENAME maps the shared
-# module's key spelling onto this file's established capitalisation; _legacy_metric_dict
-# substitutes -1 for any NaN (only R@K/lift@K can be NaN, when a cell has zero positives)
-# so every cell this script writes stays eval()-safe.
+# Result cells are serialised as repr()'d dicts inside CSV cells and parsed back with a
+# bare eval() in notebooks/VisualisationResults.ipynb, which has no `nan` name bound in
+# scope: a single stray NaN anywhere in a cell raises inside that eval() and silently
+# zeroes out the real Precision/F1/AUC numbers alongside it. So this script writes -1
+# for "missing" (as data_preparation's fillna(-1) below does) and 0 for a total training
+# failure. LEGACY_METRIC_RENAME maps the shared module's key spelling onto this file's
+# capitalisation; _legacy_metric_dict substitutes -1 for any NaN (only R@K/lift@K can be
+# NaN, when a cell has zero positives), so every cell stays eval()-safe.
 LEGACY_METRIC_RENAME = {"precision": "Precision", "f1": "F1"}
 
 
@@ -50,16 +48,14 @@ def _legacy_zero_metrics():
 
 def data_preparation(dataset, gargaml_columns, directed, score_type):
     directed_str = 'directed' if directed else 'undirected'
-    # Load the dataset. The undirected measures are written with a
-    # "_parallel" suffix by gargaml_undirected_synth.py; directed is not.
+    # The undirected measures are written with a "_parallel" suffix by
+    # gargaml_undirected_synth.py; directed is not.
     if directed:
         path_res = RESULTS_DIR+'/'+dataset+'_GARGAML_'+directed_str+'.csv'
     else:
         path_res = RESULTS_DIR+'/'+dataset+'_GARGAML_'+directed_str+'_parallel.csv'
     results_df_measures = pd.read_csv(path_res)
-    # Define GARG-AML scores
     results_df = define_gargaml_scores(results_df_measures, directed=directed, score_type=score_type)
-    # Summarise GARG-AML scores
     path = 'data/edge_data_'+dataset+'.csv'
     G = construct_synthetic_graph(path=path, directed = directed)
     G_reduced = graph_community(G)
@@ -67,13 +63,11 @@ def data_preparation(dataset, gargaml_columns, directed, score_type):
 
     for column in gargaml_columns:
         results_df[column] = summary_gargaml[column]
-    # Load ML labels
     path = 'data/label_data_'+dataset+'.csv'
     labels_df = pd.read_csv(path)
     labels_df.reset_index(inplace=True)
     labels_df = labels_df.rename(columns={"index": "node"})
 
-    # Combine labels with GARG-AML scores
     results_df = results_df.merge(labels_df, on='node', how='outer')
     results_df.fillna(-1, inplace=True)
     return results_df
@@ -82,7 +76,6 @@ def data_split(results_df, gargaml_columns, target, test_size=0.3, seed=SEED):
     X_df = results_df[gargaml_columns]
     y = results_df[target]*1
 
-    # Split the data into training and testing sets
     X_train, X_test, y_train, y_test = holdout_split(X_df, y, test_size=test_size, seed=seed)
 
     return X_train, X_test, y_train, y_test
@@ -101,7 +94,6 @@ def train_pipeline(string_name, pattern, tree_model, directed):
     data_tree = data_preparation(string_name, gargaml_columns, directed, score_type='weighted_average')
     X_train, X_test, y_train, y_test = data_split(data_tree, gargaml_columns, target=pattern, test_size=0.3)
 
-    # Train the model
     if tree_model == 'tree':
         clf = tree.DecisionTreeClassifier(min_samples_leaf=10, random_state=1997)
         clf.fit(X_train, y_train)
@@ -111,7 +103,6 @@ def train_pipeline(string_name, pattern, tree_model, directed):
     else:   
         raise ValueError("Invalid tree model specified. Choose 'tree' or 'boosting'.")
 
-    # Evaluate model
     return _legacy_metric_dict(evaluate_model(clf, X_test, y_test))
 
 def gargaml_tree_synthetic(string_name, directed):
@@ -191,7 +182,6 @@ def main():
                                 string_name = 'synthetic_' + generation_method + '_'  + str(n_nodes) + '_' + str(m_edges) + '_' + str(p_edges) + '_' + str(n_patterns)
                                 results = gargaml_tree_synthetic(string_name, directed)
                                 results_dict[string_name] = results
-    # Save results
     results_df = pd.DataFrame(results_dict)
     results_df.to_csv("synthetic_tree_"+str(directed)+"_5.csv")
 

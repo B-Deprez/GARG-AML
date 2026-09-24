@@ -92,7 +92,7 @@ def GARG_AML_node(node, G_copy, G_copy_und=None, G_copy_rev=None, directed = Fal
         return(GARG_AML_node_undirected(node, G_copy))
     
 
-def GARG_AML(G_reduced): # The method works with a pre-processed graph. G_reduced is the graph with the degree cutoff applied.
+def GARG_AML(G_reduced): # G_reduced is the graph after community reduction.
     directed = nx.is_directed(G_reduced)
     if directed:
         G_reduced_und = G_reduced.to_undirected()

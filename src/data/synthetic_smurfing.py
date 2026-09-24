@@ -3,22 +3,19 @@ import igraph as ig
 import matplotlib.pyplot as plt
 import random
 
-# No warnings
 import warnings
 warnings.filterwarnings('ignore')
 
 def add_smurfing_patterns_separate(graph, n, num_smurfs):
+    # Source, mules and target are all new nodes, so the pattern forms a
+    # component disconnected from the original graph.
     for i in range(n):
-        # Add smurfing pattern to the graph
-
-        # Determine number of nodes in the graph
         num_nodes = graph.vcount()
 
-        # Determine number of nodes in the smurfing pattern
         try:
             num_nodes_mules = num_smurfs[i]
         except:
-            num_nodes_mules = random.randint(2, 10) # Randomly have two to five money mules
+            num_nodes_mules = random.randint(2, 10) # two to ten money mules
 
         for j in range(num_nodes_mules+2): # Add two extra nodes for the source and target
             graph.add_vertex(num_nodes+j)
@@ -34,15 +31,13 @@ def add_smurfing_patterns_separate(graph, n, num_smurfs):
     return graph
 
 def add_smurfing_patterns_new_mules(graph, n, num_smurfs, list_nodes):
+    # Source and target are existing accounts; the mules between them are
+    # new nodes that only ever transact as mules.
     for i in range(n):
-        # Add smurfing pattern to the graph
-
-        # Determine number of nodes in the graph
         num_nodes = graph.vcount()
 
-        # Determine number of nodes in the smurfing pattern
         if len(num_smurfs) == 0:
-            num_nodes_mules = random.randint(2, 10) # Randomly have two to five money mules
+            num_nodes_mules = random.randint(2, 10) # two to ten money mules
         else:
             num_nodes_mules = num_smurfs[i]
         
@@ -69,12 +64,11 @@ def add_smurfing_patterns_new_mules(graph, n, num_smurfs, list_nodes):
 
 
 def add_smurfing_patterns_existing_mules(graph, n, num_smurfs, list_nodes):
+    # Source, mules and target are all existing accounts, so the pattern is
+    # masked by the normal transactions those accounts already have.
     for i in range(n):
-        # Add smurfing pattern to the graph
-
-        # Determine number of nodes in the smurfing pattern
         if len(num_smurfs) == 0:
-            num_nodes_mules = random.randint(2, 10) # Randomly have two to five money mules
+            num_nodes_mules = random.randint(2, 10) # two to ten money mules
         else:
             num_nodes_mules = num_smurfs[i]
     
@@ -102,9 +96,10 @@ def add_smurfing_patterns(graph, n, list_nodes, num_smurfs=[] ,type_pattern=''):
     Add smurfing patterns to the original graph
     :param graph: igraph.Graph object
     :param n: number of smurfing patterns to add
-    :param num_smurfs: number of smurfs to add to each smurfing pattern
-    :param type: type of smurfing pattern to add (separate, new_mules, existing_mules)
-    :return: graph_smurfing: igraph.Graph object with smurfing patterns added
+    :param list_nodes: pool of existing nodes, each usable in one pattern
+    :param num_smurfs: number of smurfs per pattern (empty, one value or n values)
+    :param type_pattern: type of smurfing pattern (separate, new_mules, existing_mules)
+    :return: the graph with the patterns added, and the remaining node pool
     """
 
     assert type(num_smurfs) == list, 'Number of smurfs should be a list'
@@ -163,18 +158,16 @@ def create_synthetic_data(n_nodes, m_edges, p_edges, generation_method, n_patter
     rg.es['laundering'] = False
 
     ## Add smurfing patterns
-    # We implement three types of smurfing patterns: separate, new_mules, existing_mules
-    # Separate: Smurfing patterns are separate from the original graph
-    # new_mules: Smurfing patterns are constructed using new mules (which only make transactions as money mules)
-    # existing_mules: Smurfing patterns are constructed using existing mules (which have made normal transactions in the past)
-    # All three patterns are added to study robustness to masking
-    # The node list is updated, since each node can only be used once in a smurfing pattern
+    # All three injection types go into every graph, so that detection can be
+    # studied under increasing amounts of masking by normal activity. The node
+    # list is passed on, since each node is used in at most one pattern.
     graph_smurfing, list_nodes = add_smurfing_patterns(rg, n_patterns, list_nodes, type_pattern='separate')
     graph_smurfing, list_nodes = add_smurfing_patterns(rg, n_patterns, list_nodes, type_pattern='new_mules')
     graph_smurfing, list_nodes = add_smurfing_patterns(rg, n_patterns, list_nodes, type_pattern='existing_mules')
     graph_smurfing.simplify(combine_edges='max')
 
-    # Visualise the graph
+    # Only small graphs are plotted; a layout of a larger one is unreadable
+    # and slow.
     if graph_smurfing.vcount() < 1000:
         graph_smurfing.vs['color'] = ['red' if x['new_node'] else 'blue' for x in graph_smurfing.vs]
         graph_smurfing.vs['size'] = [10 if x['laundering'] else 5 for x in graph_smurfing.vs]
@@ -187,12 +180,10 @@ def create_synthetic_data(n_nodes, m_edges, p_edges, generation_method, n_patter
         visual_style["edge_width"] = 1
         ig.plot(graph_smurfing, **visual_style, target='data/visualisation_network_'+string_name+'.pdf')
 
-    # Extract nodes into a pandas dataframe
     nodes_data = {attr: graph_smurfing.vs[attr] for attr in graph_smurfing.vs.attributes()}
     nodes_df = pd.DataFrame(nodes_data)[['separate', 'new_mules', 'existing_mules', 'laundering']]
     nodes_df.fillna(False, inplace=True)
 
-    # Extract edges into a pandas dataframe
     source_list = []
     target_list = []
     for edge in graph_smurfing.es:
@@ -208,7 +199,7 @@ def create_synthetic_data(n_nodes, m_edges, p_edges, generation_method, n_patter
     n_labels = nodes_df['laundering'].sum()
     print('Number of labelled nodes:', n_labels)
 
-    # Save the dataframe to a CSV file
+    # Node labels and edge list are the two inputs the *_synth.py scripts read.
     nodes_df.to_csv('data/label_data_'+string_name+'.csv', index=False)
     edges_df.to_csv('data/edge_data_'+string_name+'.csv', index=False)
 

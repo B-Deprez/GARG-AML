@@ -1,51 +1,49 @@
 #!/bin/bash
-# Shared setup for the GARG-AML Slurm jobs. SOURCED by every .slurm file, never
+# Shared setup for the GARG-AML Slurm jobs. Sourced by every .slurm file, never
 # executed by one -- it defines functions and exports and runs no work itself.
 #
 #   source slurm/common.sh
 #   resolve_dataset "${1:-}"
 #
-# Executing it directly is a free sanity check that costs nothing and needs no
-# cluster:
+# Executing it directly is a sanity check that needs no cluster:
 #
 #   bash slurm/common.sh
 #
 # which prints the valid dataset names, the synthetic array ranges, and the
-# index -> name mapping, so a --array spec can be checked before submission.
+# index -> name mapping, so an --array spec can be checked before submission.
 #
 # Bash 3.2 compatible on purpose (macOS ships 3.2): indexed arrays only, no
 # associative arrays, no namerefs, no ${var^^}.
 
 # --- Dataset names ----------------------------------------------------------
-# SOURCE OF TRUTH: scripts/gargaml_directed.py (the `datasets` list) and its
-# character-identical twin in scripts/gargaml_undirected.py and the DATASETS
-# list in scripts/gargaml_tree.py. This array must stay in the same ORDER as
+# Source of truth: the `datasets` list in scripts/gargaml_directed.py, its
+# character-identical twin in scripts/gargaml_undirected.py, and the DATASETS
+# list in scripts/gargaml_tree.py. This array must stay in the same order as
 # those, because an array task selects its dataset by index: Python resolves
 # SLURM_ARRAY_TASK_ID through src/utils/runtime.py::select_datasets, which
 # indexes the script's own list. A reordering here that is not mirrored there
 # silently runs the wrong dataset.
 #
-# Verify the two agree at any time with:
+# Check the two agree at any time with:
 #   bash slurm/common.sh --verify
 IBM_DATASETS=(
-  "HI-Small_bank012"      # 0  task-5 view: largest single bank, 12,180 nodes
-  "HI-Small_banktop50"    # 1  task-5 view: 50 largest banks pooled, 164,822 nodes
-  "HI-Small_res1"         # 2  task-4 Louvain sweep
-  "HI-Small_res5"         # 3  task-4 Louvain sweep
-  "HI-Small"              # 4  THE PUBLISHED SETTING (resolution 10), 515,080 nodes
-  "HI-Small_res20"        # 5  task-4 Louvain sweep
-  "HI-Small_res50"        # 6  task-4 Louvain sweep
+  "HI-Small_bank012"      # 0  single-bank view: largest bank, 12,180 nodes
+  "HI-Small_banktop50"    # 1  pooled view: 50 largest banks, 164,822 nodes
+  "HI-Small_res1"         # 2  Louvain resolution 1
+  "HI-Small_res5"         # 3  Louvain resolution 5
+  "HI-Small"              # 4  main setting, Louvain resolution 10, 515,080 nodes
+  "HI-Small_res20"        # 5  Louvain resolution 20
+  "HI-Small_res50"        # 6  Louvain resolution 50
   "LI-Large"              # 7  2,054,390 nodes / 176M edges -- the big one
-  "HI-Small_nolouvain"    # 8  task-4 control: no reduction at all
-  "LI-Large_nolouvain"    # 9  EXPECTED INFEASIBLE -- see slurm/README.md
+  "HI-Small_nolouvain"    # 8  control: no reduction at all
+  "LI-Large_nolouvain"    # 9  expected infeasible -- see slurm/README.md
 )
 
 # --- Synthetic array ranges -------------------------------------------------
 # construct_datasets() in scripts/gargaml_{directed,undirected}_synth.py yields
-# 66 names in a deterministic order, with the size tiers CONTIGUOUS. Verified by
-# enumerating the list, not by reading the loop. Submitting the tiers as
-# separate ranges is what keeps the cheap 44 out of the queue behind the
-# expensive 22.
+# 66 names in a deterministic order, with the size tiers contiguous. Submitting
+# the tiers as separate ranges is what keeps the cheap 44 out of the queue
+# behind the expensive 22.
 SYNTH_TOTAL=66
 SYNTH_RANGE_SMALL="0-21"     # 100 nodes      -- seconds each
 SYNTH_RANGE_MEDIUM="22-43"   # 10,000 nodes   -- ~4 min median each
@@ -62,7 +60,7 @@ fi
 
 # Keep pandas/numpy from oversubscribing the allocation. The measure scripts
 # parallelise with multiprocessing, not BLAS threads, so extra BLAS threads only
-# contend. Left unset if you would rather not pin it -- see slurm/README.md.
+# contend. Left unset by default -- see slurm/README.md.
 # export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-1}"
 
 # --- resolve_dataset --------------------------------------------------------
@@ -134,7 +132,7 @@ resolve_synth_index() {
 }
 
 # --- Self-test --------------------------------------------------------------
-# Runs only when the file is EXECUTED, never when it is sourced.
+# Runs only when the file is executed, never when it is sourced.
 if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
   echo "GARG-AML Slurm harness -- slurm/common.sh"
   echo

@@ -1,13 +1,13 @@
 """
-How many laundering patterns the Louvain step destroys (task 4, R2-M3).
+How many laundering patterns the Louvain reduction splits across communities.
 
-The sweep in the measure scripts answers "how much does the pre-processing
-discard"; this answers "what does it discard". For every laundering attempt
-in the IBM patterns file, at every resolution in the sweep, it records
-whether the attempt's accounts stayed in one community, how many of its own
-edges survived, and -- the number that matters -- whether its two-hop
-source/mule/target structure survived at all. Once that is gone GARG-AML
-cannot see the pattern, whatever the score threshold.
+For every laundering attempt in the IBM patterns file, at every resolution
+in the sweep, this records whether the attempt's accounts stayed in one
+community, how many of its own edges survived, and whether its two-hop
+source/mule/target structure survived at all. Once that structure is gone
+GARG-AML cannot see the pattern, whatever the score threshold.
+
+Run from the repository root::
 
     python scripts/pattern_splitting.py
 
@@ -23,23 +23,13 @@ Outputs
 ``results/pattern_splitting_summary.csv``
     Every dataset pooled, for the table.
 
-Read it beside ``results/louvain_severance.csv``: the pair is the argument.
-Edges severed says what the step costs, patterns destroyed says what it
-costs *us*.
+Companion to ``results/louvain_severance.csv``, which records how many edges
+the same reduction severs.
 
-Cost
-----
-The graph is built **once** and only Louvain is re-run per resolution, which
-is what makes the whole sweep affordable -- graph construction from the
-475 MB transactions file dominates a single-resolution run. Expect a few
-minutes for HI-Small, most of it before the first resolution.
-
-Ground truth
-------------
-Exact, not inferred: ``data/<dataset>_Patterns.txt`` delimits each attempt
-with its own transaction list, so attempt membership is read rather than
-reconstructed. HI-Small holds 370 attempts, 95 of them the GATHER-SCATTER /
-SCATTER-GATHER shapes GARG-AML targets.
+The graph is built once and only Louvain is re-run per resolution; graph
+construction from the transactions file dominates the runtime. Attempt
+membership is exact rather than inferred: ``data/<dataset>_Patterns.txt``
+delimits each attempt with its own transaction list.
 """
 
 import os
@@ -62,19 +52,17 @@ from src.utils.pattern_splitting import analyse, summarise
 from src.utils.runtime import (env_override, select_datasets, echo_config, as_list,
                               resolve_results_dir)
 
-# Datasets to diagnose. LI-Large is listed but is the multi-hour job -- its
-# graph alone is 176M edges.
+# Datasets to diagnose; LI-Large is the expensive run.
 DATASETS = ["HI-Small"]
 # DATASETS = ["HI-Small", "LI-Large"]
 
 # The sweep, matching the arms in the measure scripts. ``None`` is the
 # no-Louvain control: nothing is partitioned, so every attempt survives
-# intact by construction. It is kept in the list rather than assumed,
-# because a control that is computed and comes out at 100 % is evidence that
-# the measurement is doing what it claims.
+# intact. It is computed rather than assumed, so the control goes through
+# the same measurement as the rest.
 RESOLUTIONS = [None, 1, 5, DEFAULT_RESOLUTION, 20, 50]
 
-# Slurm overrides; the constants above remain the documented defaults.
+# Environment overrides, for array jobs; the constants above are the defaults.
 DATASETS = select_datasets(DATASETS)
 RESULTS_DIR = resolve_results_dir()
 
@@ -97,7 +85,7 @@ def diagnose_dataset(dataset):
         if resolution is None:
             # No partition at all: one community for everything, so nothing
             # is severed. Built explicitly rather than special-cased inside
-            # the analysis, so the control goes down the same code path.
+            # the analysis, so the control takes the same code path.
             communities = dict.fromkeys(nodes, 0)
         else:
             communities = community_map(G, resolution=resolution)
@@ -136,12 +124,10 @@ def main():
     if not summaries:
         return
 
-    # A sharded/array submission (one dataset per task, via GARGAML_DATASET /
-    # GARGAML_DATASET_INDEX / SLURM_ARRAY_TASK_ID) only ever sees its own
-    # dataset in DATASETS, so the pooled write below would silently clobber
-    # the fixed-name pooled file with just that one dataset's rows,
-    # discarding every other task's. Skip it in that case; the per-dataset
-    # files above are written normally either way.
+    # A sharded/array submission (one dataset per task) only ever sees its own
+    # dataset in DATASETS, so the pooled write below would clobber the
+    # fixed-name pooled file with that one dataset's rows. Skip it in that
+    # case; the per-dataset files above are written either way.
     sharded = any(os.environ.get(k) for k in
                   ("GARGAML_DATASET", "GARGAML_DATASET_INDEX", "SLURM_ARRAY_TASK_ID"))
     if sharded:

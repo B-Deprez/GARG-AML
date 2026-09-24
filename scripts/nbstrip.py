@@ -1,12 +1,9 @@
 """
-Strip Jupyter notebook outputs before they reach git (task 13).
+Strip Jupyter notebook outputs before they reach git.
 
-Not part of the pipeline -- a repository hygiene tool, like
-``test_parallel.py`` is a sanity check rather than a stage. Committed
-notebook outputs previously caused an HTTP 400 push failure on this
-repository, and four of the six tracked notebooks still carry them
-(``VisualisationResults.ipynb`` alone is 2.2 MB, almost all of it base64
-figure data).
+A repository hygiene tool rather than a pipeline stage: notebook outputs
+are bulky, mostly base64 figure data, and hold nothing a re-run does not
+regenerate.
 
 Standard library only, deliberately: this runs as a git *clean filter*,
 so it executes on every ``git add`` and ``git status`` of a notebook. A
@@ -17,9 +14,8 @@ more; it is not used here only to keep the filter dependency-free.
 
 Formatting is preserved exactly. ``json.dumps(..., indent=1,
 sort_keys=True, separators=(",", ": "))`` plus a trailing newline
-reproduces nbformat's own writer byte for byte -- verified against all
-twelve notebooks in this repository -- so a stripped notebook diffs only
-where the outputs were, with no reformatting churn.
+reproduces nbformat's own writer byte for byte, so a stripped notebook
+diffs only where the outputs were, with no reformatting churn.
 
 Three ways to run it::
 
