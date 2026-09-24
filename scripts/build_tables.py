@@ -86,8 +86,17 @@ DATASETS = ["HI-Small", "LI-Large"]
 METRICS = ["AUC_PR", "AUC_ROC"]
 
 # The alert-queue tables are per (cut-off, pattern) cell; one table per cell
-# in the whole grid would be 45 tables, so this is the headline slice.
-ALERT_CELLS = [(0.1, "Is Laundering"),
+# in the whole grid would be 54 tables, so this is the headline slice. Each
+# pattern appears at both 0.0 ("at least one laundering transaction") and the
+# published 0.1, because the pair read side by side is what answers the
+# reviewer's question about the label cut-off: whether the ranking is
+# sensitive to where the propensity threshold sits, at the queue sizes an
+# investigator actually works. Drop the 0.0 rows here if the appendix gets
+# too long -- they are written as separate \input files.
+ALERT_CELLS = [(0.0, "Is Laundering"),
+               (0.0, "SCATTER-GATHER"),
+               (0.0, "GATHER-SCATTER"),
+               (0.1, "Is Laundering"),
                (0.1, "SCATTER-GATHER"),
                (0.1, "GATHER-SCATTER")]
 ALERT_METRICS = ["P@K", "R@K", "lift@K", "TP@K"]

@@ -20,7 +20,7 @@ from src.utils.graph_processing import graph_community
 from src.methods.utils.neighbourhood_functions import GARG_AML_nodeselection
 
 from src.data.pattern_construction import define_ML_labels, summarise_ML_labels
-from src.utils.evaluation import SEED, evaluate_scores, metric_records, nan_metrics, write_metrics
+from src.utils.evaluation import CUT_OFFS, SEED, evaluate_scores, metric_records, nan_metrics, write_metrics
 from src.utils.runtime import resolve_results_dir
 
 RESULTS_DIR = resolve_results_dir()
@@ -149,7 +149,7 @@ def data_preparation(dataset, measure_df):
 
 def IF_AUC(dataset, measure_df, directed=True):
     str_directed = "directed" if directed else "undirected"
-    cut_offs = [0.1, 0.2, 0.3, 0.5, 0.9]
+    cut_offs = CUT_OFFS # the canonical sweep, 0.0 included -- see src/utils/evaluation.py
     columns = ['Is Laundering', 'FAN-OUT', 'FAN-IN', 'GATHER-SCATTER', 'SCATTER-GATHER', 'CYCLE', 'RANDOM', 'BIPARTITE', 'STACK']
 
     laundering_combined = data_preparation(dataset, measure_df)

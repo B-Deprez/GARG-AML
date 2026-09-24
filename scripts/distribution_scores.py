@@ -7,10 +7,10 @@ sys.path.append(DIR)
 
 from src.data.pattern_construction import define_ML_labels, summarise_ML_labels
 from src.methods.gargaml_scores import define_gargaml_scores
-from src.utils.evaluation import (LEGACY_METRICS, SEED, evaluate_scores,
-                                  fold_assignments, folds_path, metric_names,
-                                  metric_records, nan_metrics, read_folds,
-                                  write_metrics)
+from src.utils.evaluation import (CUT_OFFS, LEGACY_METRICS, SEED,
+                                  evaluate_scores, fold_assignments, folds_path,
+                                  metric_names, metric_records, nan_metrics,
+                                  read_folds, write_metrics)
 from src.utils.naming import gargaml_key
 from src.utils.runtime import resolve_results_dir
 import pandas as pd
@@ -104,7 +104,7 @@ def distribution_scores_IBM_plots(dataset, results_df, str_directed, str_supervi
     print("="*10)
     print("Data loaded")
 
-    cut_offs = [0.1, 0.2, 0.3, 0.5, 0.9]
+    cut_offs = CUT_OFFS # the canonical sweep, 0.0 included -- see src/utils/evaluation.py
     columns = ['Is Laundering', 'FAN-OUT', 'FAN-IN', 'GATHER-SCATTER', 'SCATTER-GATHER', 'CYCLE', 'RANDOM', 'BIPARTITE', 'STACK']
 
     n = len(cut_offs)
@@ -293,7 +293,7 @@ def distribution_scores_IBM(dataset, results_df, str_directed, str_supervised):
     model_key = gargaml_key("base", str_directed == "directed")
     records = []
 
-    cut_offs = [0.1, 0.2, 0.3, 0.5, 0.9]
+    cut_offs = CUT_OFFS # the canonical sweep, 0.0 included -- see src/utils/evaluation.py
     columns = ['Is Laundering', 'FAN-OUT', 'FAN-IN', 'GATHER-SCATTER', 'SCATTER-GATHER', 'CYCLE', 'RANDOM', 'BIPARTITE', 'STACK']
 
     n = len(cut_offs)

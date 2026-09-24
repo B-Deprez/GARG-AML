@@ -21,17 +21,19 @@ that comparison fair rather than rhetorical.
     number would not support it: GARG-AML's fit cost is zero, which is only
     visible if fit is reported apart from preprocessing.
 
-Run budget (task 1's own arithmetic: ~90 runs + ~30)
-----------------------------------------------------
-HI-Small  3 cut-offs x 3 targets x 5 folds x 2 configs = 90 fits.
-LI-Large  3 cut-offs x 1 target  x 5 folds x 2 configs = 30 fits.
+Run budget (task 1's arithmetic, re-done for the 0.0 cut-off: ~120 + ~40)
+------------------------------------------------------------------------
+HI-Small  4 cut-offs x 3 targets x 5 folds x 2 configs = 120 fits.
+LI-Large  4 cut-offs x 1 target  x 5 folds x 2 configs = 40 fits.
 
-The cut-offs are the paper's headline 0.1 / 0.5 / 0.9 and the HI-Small
-targets are the pooled label plus the two patterns GARG-AML actually targets
-(GATHER-SCATTER, SCATTER-GATHER). This is a **deliberate, logged** reduction
-of gargaml_tree.py's 5 x 9 grid, not a silent truncation: a GNN fit is
-minutes where a decision tree is seconds, and the full grid would be ~450
-fits. Widen ``DATASETS`` below if the compute budget allows.
+The cut-offs are the headline slice ``HEADLINE_CUTOFFS`` -- the paper's
+0.1 / 0.5 / 0.9 plus 0.0 ("at least one laundering transaction"), which a
+reviewer asked for -- and the HI-Small targets are the pooled label plus the
+two patterns GARG-AML actually targets (GATHER-SCATTER, SCATTER-GATHER).
+This is a **deliberate, logged** reduction of gargaml_tree.py's 6 x 9 grid,
+not a silent truncation: a GNN fit is minutes where a decision tree is
+seconds, and the full grid would be ~540 fits. Widen ``DATASETS`` below if
+the compute budget allows.
 
 Expect cut-off 0.9 to fail on some targets for too few positives, exactly as
 it does for the tree models. Those cells are reported as NaN with a reason,
@@ -80,6 +82,7 @@ from src.methods.graphsage import (
     train_fold,
 )
 from src.utils.evaluation import (
+    HEADLINE_CUTOFFS,
     SEED,
     aggregate_folds,
     evaluate_scores,
@@ -101,13 +104,13 @@ CONFIG_SUFFIXES = {"topology": "_graphsage", "attributes": "_graphsage_attr"}
 
 DATASETS = {
     "HI-Small": dict(
-        cut_offs=[0.1, 0.5, 0.9],
+        cut_offs=HEADLINE_CUTOFFS,
         targets=["Is Laundering", "GATHER-SCATTER", "SCATTER-GATHER"],
         infer_batch_size=None,  # the full graph fits; full-graph inference
         num_workers=0,
     ),
     "LI-Large": dict(
-        cut_offs=[0.1, 0.5, 0.9],
+        cut_offs=HEADLINE_CUTOFFS,
         targets=["Is Laundering"],
         infer_batch_size=4096,  # 2M nodes / 352M edges will not fit on a GPU
         num_workers=4,          # with pyg-lib installed; see task 1's notes

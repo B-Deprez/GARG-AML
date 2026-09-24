@@ -100,10 +100,11 @@ INSTITUTIONS = ["012", "top50"]
 DIRECTIONS = [False, True]
 SCORE_TYPE = "weighted_average"
 
-# 0.0 means "involved in at least one laundering transaction". It is not one
-# of the paper's swept cut-offs, and is reported here because a single
-# institution has too few positives at 0.1 and above to carry a claim: bank
-# 012 has 87 clients at 0.0 against 16 at 0.1 and 1 at 0.5.
+# 0.0 means "involved in at least one laundering transaction", and is now part
+# of the main sweep too (src/utils/evaluation.py::CUT_OFFS). It leads here
+# because a single institution has too few positives at 0.1 and above to carry
+# a claim: bank 012 has 87 clients at 0.0 against 16 at 0.1 and 1 at 0.5. This
+# appendix stays on the two most populated cut-offs rather than the full list.
 CUT_OFFS = [0.0, 0.1]
 TARGET_COLUMNS = ["Is Laundering", "GATHER-SCATTER", "SCATTER-GATHER"]
 

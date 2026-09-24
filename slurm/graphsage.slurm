@@ -46,10 +46,12 @@
 #          200 GB envelope, not a measured peak. Its num_workers=4 assumes
 #          pyg-lib is present (see the script's docstring); without it the
 #          neighbour sampler is slower but not heavier.
-# TIME     12:00:00 for HI-Small: the docstring's sweep is 3 cut-offs x 3 targets
-#          x 5 folds x 2 configs = 90 fits, and a GNN fit is minutes where a tree
-#          is seconds. This is a logged reduction of the full grid, not the tree
-#          models' 5 x 9 sweep -- do not assume parity.
+# TIME     16:00:00 for HI-Small: the docstring's sweep is 4 cut-offs x 3 targets
+#          x 5 folds x 2 configs = 120 fits, and a GNN fit is minutes where a tree
+#          is seconds. It was 12 h for 90 fits before the 0.0 label cut-off was
+#          added to the headline slice; 16 h is the same margin at the documented
+#          envelope. This is a logged reduction of the full grid, not the tree
+#          models' 6 x 9 sweep -- do not assume parity.
 
 #SBATCH --job-name=gargaml_graphsage
 #SBATCH --output=gargaml_graphsage.out
@@ -60,7 +62,7 @@
 #SBATCH --ntasks=1
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
-#SBATCH --time=12:00:00
+#SBATCH --time=16:00:00
 #SBATCH --mem=64g
 #SBATCH --account=lp_verbekelab
 #SBATCH --mail-type=FAIL,BEGIN,END

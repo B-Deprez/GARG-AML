@@ -17,6 +17,8 @@ from src.data.bank_views import (bank_clients, parse_view, patterns_path,
                                  resolve_banks, trans_path)
 from src.utils.graph_processing import parse_resolution, reduce_graph
 from src.utils.evaluation import (
+    CUT_OFFS,
+    HEADLINE_CUTOFFS,
     SEED,
     cv_splits,
     evaluate_model,
@@ -101,21 +103,25 @@ DATASETS = ["HI-Small_bank012", "HI-Small_banktop50",
             # No-Louvain arms last -- see the note above.
             "HI-Small_nolouvain", "LI-Large_nolouvain"]
 
-# The default sweep: every cut-off and every pattern.
-CUT_OFFS = [0.1, 0.2, 0.3, 0.5, 0.9]
+# The default sweep: every cut-off and every pattern. The cut-offs come from
+# src/utils/evaluation.py rather than being declared here -- one canonical
+# list, imported by every script that sweeps labels. It now starts at 0.0
+# ("involved in at least one laundering transaction"), so this grid is 6
+# cut-offs wide, not the published 5, and every result file written before
+# that lacks the 0.0 row.
 TARGET_COLUMNS = ['Is Laundering', 'FAN-OUT', 'FAN-IN', 'GATHER-SCATTER', 'SCATTER-GATHER', 'CYCLE', 'RANDOM', 'BIPARTITE', 'STACK']
 
 # Per-dataset reductions of that sweep, keyed by the *underlying* dataset so a
 # task-5 view inherits its base's settings (same idiom as the DATASETS dict in
 # graphsage_baseline.py). This is the sanctioned, logged place for task 7's
-# LI-Large reduction -- the full grid is 5 cut-offs x 9 targets x 2 models x 4
-# feature configs = 360 fits, and 1800 under 5-fold CV, which LI-Large will not
-# carry. Restricting it to the paper's headline cut-offs (0.1 / 0.5 / 0.9)
+# LI-Large reduction -- the full grid is 6 cut-offs x 9 targets x 2 models x 4
+# feature configs = 432 fits, and 2160 under 5-fold CV, which LI-Large will not
+# carry. Restricting it to the headline cut-offs (0.0 / 0.1 / 0.5 / 0.9)
 # matches what graphsage_baseline.py already does there, so the two models stay
 # comparable cell for cell. Record a reduction here rather than trimming the
 # module constants, which would silently shrink HI-Small's grid too.
 DATASET_SETTINGS = {
-    "LI-Large": dict(cut_offs=[0.1, 0.5, 0.9]),
+    "LI-Large": dict(cut_offs=HEADLINE_CUTOFFS),
 }
 
 

@@ -55,7 +55,7 @@ import warnings
 import numpy as np
 import pandas as pd
 
-from src.utils.evaluation import ALERT_SIZES, LEGACY_METRICS
+from src.utils.evaluation import ALERT_SIZES, HEADLINE_CUTOFFS, LEGACY_METRICS
 from src.utils.features import is_direction_free
 from src.utils.graph_processing import DEFAULT_RESOLUTION, parse_resolution
 from src.utils.naming import MODEL_ORDER, pretty_config
@@ -89,8 +89,9 @@ AT_K_METRICS = ["P@K", "R@K", "lift@K", "TP@K", "ties@K"]
 COST_METRICS = ["fit_seconds", "infer_seconds", "peak_host_mb", "peak_gpu_mb",
                 "epochs_run", "epochs_to_best"]
 
-# Tables 10-11's slice of the grid.
-HEADLINE_CUTOFFS = [0.1, 0.5, 0.9]
+# Tables 10-11's slice of the grid. HEADLINE_CUTOFFS comes from
+# src/utils/evaluation.py so the reported slice and the sweep the expensive
+# runs actually execute cannot drift apart; it is 0.0 / 0.1 / 0.5 / 0.9.
 HEADLINE_TARGETS = ["Is Laundering", "GATHER-SCATTER", "SCATTER-GATHER"]
 
 
