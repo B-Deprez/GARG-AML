@@ -28,6 +28,13 @@ Three jobs:
    ``<dataset>_<metric>_<model>_<direction>_combined.csv`` matrices
    unchanged, so the visualisation notebooks keep working untouched.
 
+Label cut-offs
+--------------
+:data:`CUT_OFFS` is the one label sweep every script reads, and
+:data:`HEADLINE_CUTOFFS` the slice the manuscript reports and the expensive
+runs restrict themselves to. Both include ``0.0`` -- see the comment on
+:data:`CUT_OFFS` for what a cut-off of zero means and why it is here.
+
 Evaluation population
 ---------------------
 Metrics are computed on the 30% test split by default (:func:`holdout_split`),
@@ -79,8 +86,39 @@ from sklearn.metrics import (
 from sklearn.model_selection import StratifiedKFold, train_test_split
 
 # Realistic alert-queue sizes: what a team can actually work through,
-# not a fraction of the node set.
-ALERT_SIZES = [50, 100, 500, 1000]
+# not a fraction of the node set. K=10 is here for the synthetic grid, whose
+# 100-node datasets leave a 30-row test split -- every larger K collapses onto
+# the same number there (k_eff = min(K, n)), so P@50 and P@100 are literally
+# equal and report nothing but overall precision. It is reported on the IBM
+# data too, where it is additive: nothing selects a K by position.
+ALERT_SIZES = [10, 50, 100, 500, 1000]
+
+# The label cut-off sweep, canonical for the whole repository.
+#
+# An account's label for a target column is its *propensity*: that account's
+# laundering-flagged transactions of that type over all of its transactions
+# (src/data/pattern_construction.py::summarise_ML_labels). Every call site
+# labels with the strict comparison ``propensity > cutoff``, so 0.0 is a
+# cut-off like any other and means "involved in at least one laundering
+# transaction" -- the most inclusive labelling available, and the one a
+# reviewer asked for: at 0.1 an account whose single laundering transaction
+# sits among ten legitimate ones is already labelled clean, which is a
+# modelling choice the paper never justified. It is also the cut-off with the
+# most positives, so it is the cell most likely to be evaluable where 0.5 and
+# 0.9 come back NaN for too few of them.
+#
+# Declared here rather than per script: gargaml_tree.py, gargaml_IF.py and
+# distribution_scores.py each carried their own copy of this list, which is
+# how three sweeps that must agree drift apart.
+CUT_OFFS = [0.0, 0.1, 0.2, 0.3, 0.5, 0.9]
+
+# The slice that is actually reported (Tables 10-11) and the reduced sweep the
+# expensive runs use -- LI-Large's entry in gargaml_tree.py's DATASET_SETTINGS
+# and graphsage_baseline.py's DATASETS both point here, so the two stay
+# comparable cell for cell. 0.0 joins the published 0.1 / 0.5 / 0.9 because
+# the reviewer's question is about the label definition itself, which a
+# reduced sweep would otherwise leave unanswered on the large dataset.
+HEADLINE_CUTOFFS = [0.0, 0.1, 0.5, 0.9]
 
 # The reproducibility seed used throughout the repository.
 SEED = 1997
