@@ -132,6 +132,15 @@ CHECKPOINT_DIR = env_override(
 # from results/<dataset>_folds.csv, so a local constant cannot drift out of
 # sync with the partition on disk.
 
+# That partition only ever exists for the IBM data: cross-validation is scoped
+# there and the synthetic grid keeps its single holdout split, so a synthetic
+# name arriving via GARGAML_DATASET is a mistake rather than a run to attempt.
+if DATASET.startswith("synthetic"):
+    raise ValueError(
+        "this baseline is for the IBM data only; " + DATASET + " is synthetic. "
+        "The synthetic grid is not cross-validated and has no folds file."
+    )
+
 
 def load_labels(dataset):
     """Per-account label table -- the same functions gargaml_tree.py uses.

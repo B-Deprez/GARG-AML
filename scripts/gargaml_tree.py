@@ -98,6 +98,20 @@ DATASETS = select_datasets(DATASETS)
 N_FOLDS = env_override("n_folds", N_FOLDS, int)
 RESULTS_DIR = resolve_results_dir()
 
+# Cross-validation is scoped to the IBM data. The 66 synthetic datasets keep
+# the single 70/30 holdout: their variance is the spread across the grid, and
+# the Friedman/Nemenyi test is specified over that N, so folding them would
+# not be a cheaper version of the same analysis. select_datasets takes
+# GARGAML_DATASET verbatim, which is the one way a synthetic name can reach
+# this script -- refuse it here rather than at the missing _Trans.csv.
+_synthetic = [d for d in DATASETS if d.startswith("synthetic")]
+if _synthetic:
+    raise ValueError(
+        "this script is for the IBM data only; " + ", ".join(_synthetic)
+        + " is synthetic. The synthetic grid is fitted on a single holdout "
+        "split by scripts/gargaml_tree_synthetic{,_3,_5}.py."
+    )
+
 # Defaults for gargaml_tree/gargaml_boosting's own save_path, under RESULTS_DIR.
 DEFAULT_TREE_SAVE_PATH = RESULTS_DIR+"/model_tree.pkl"
 DEFAULT_BOOST_SAVE_PATH = RESULTS_DIR+"/model_boosting.pkl"
