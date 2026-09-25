@@ -1,6 +1,6 @@
 # Stage 1 on the synthetic grid: per-node directed block measures, written to
 # results/<dataset>_GARGAML_directed.csv and read back by the tree scripts.
-# Run from the repository root; all paths below are root-relative.
+# Run from the repository root; paths below are root-relative.
 import os
 import sys
 import time
@@ -56,22 +56,22 @@ def construct_datasets():
         100, 
         10000, 
         100000
-        ] # Number of nodes in the graph
+        ]
     m_edges_list = [
         1, 
         2, 
         5
-        ] # Number of edges to attach from a new node to existing nodes
+        ] # BA/WS: edges attached per new node
     p_edges_list = [
         0.001, 
         0.01
-        ] # Probability of adding an edge between two nodes
+        ] # ER/WS: edge probability
     generation_method_list = [
         'Barabasi-Albert', 
         'Erdos-Renyi', 
         'Watts-Strogatz'
-        ] # Generation method for the graph
-    n_patterns_list = [3, 5] # Number of smurfing patterns to add
+        ]
+    n_patterns_list = [3, 5]
 
     for n_nodes in n_nodes_list:
         for n_patterns in n_patterns_list:
@@ -96,13 +96,12 @@ def construct_datasets():
 
 datasets = construct_datasets()
 directed = True
-# Parallelism: use up to 4 or half of CPUs
 n_cpu = min(4, cpu_count() // 2)
 
-# Environment overrides, for array jobs: the constants above are the defaults,
-# and a task selects its dataset and worker count through the environment
-# instead of editing this file. The worker count stays an explicit cap rather
-# than an auto-detect, since it determines the runtimes reported below.
+# Environment overrides, for array jobs: a task selects its dataset and
+# worker count through the environment instead of editing this file. The
+# worker count stays an explicit cap rather than an auto-detect, since it
+# determines the runtimes reported below.
 datasets = select_datasets(datasets)
 n_cpu = env_override("n_cpu", n_cpu, int)
 RESULTS_DIR = resolve_results_dir()
@@ -140,14 +139,11 @@ if __name__ == '__main__':
         elapsed = timeit.default_timer() - start_time
         print(f"Dataset {dataset} completed in {elapsed:.2f} seconds")
 
-        # Log timing
         with open(f"{RESULTS_DIR}/time_results_dir.txt", "a") as f:
             f.write(f"{dataset}: {elapsed:.2f}\n")
         # Per-task timing file beside the shared append, which is a race under
         # an array job. slurm/collect.slurm concatenates these.
         log_timing(dataset, "directed", elapsed, n_cpu, results_dir=RESULTS_DIR)
-
-        # Save DataFrame
 
         df = pd.DataFrame({
             "node": nodes,

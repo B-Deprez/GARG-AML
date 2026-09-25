@@ -73,20 +73,17 @@ from sklearn.metrics import (
 from sklearn.model_selection import StratifiedKFold, train_test_split
 
 # Realistic alert-queue sizes: what a team can work through, not a fraction of
-# the node set. K=10 matters on the synthetic grid, whose 100-node datasets
-# leave a 30-row test split -- every larger K collapses onto k_eff = min(K, n)
-# there, so P@50 and P@100 report nothing but overall precision.
+# the node set. On the synthetic grid's 100-node datasets (30-row test split)
+# every K above 10 collapses onto k_eff = min(K, n), so P@50/P@100 there just
+# report overall precision.
 ALERT_SIZES = [10, 50, 100, 500, 1000]
 
-# The label cut-off sweep, canonical for the whole repository.
-#
-# An account's label for a target column is its *propensity*: that account's
-# laundering-flagged transactions of that type over all of its transactions
-# (src/data/pattern_construction.py::summarise_ML_labels). Every call site
-# labels with the strict comparison ``propensity > cutoff``, so 0.0 means
-# "involved in at least one laundering transaction" -- the most inclusive
-# labelling available, and the cut-off with the most positives, hence the one
-# most likely to be evaluable where 0.5 and 0.9 come back NaN.
+# The label cut-off sweep, canonical for the whole repository. A label is an
+# account's *propensity* -- laundering-flagged transactions of that type over
+# all of its transactions (src/data/pattern_construction.py::summarise_ML_labels)
+# -- compared with the strict ``propensity > cutoff``. So 0.0 means "involved
+# in at least one laundering transaction": the most inclusive labelling, hence
+# the cut-off most likely to be evaluable where 0.5/0.9 come back NaN.
 CUT_OFFS = [0.0, 0.1, 0.2, 0.3, 0.5, 0.9]
 
 # The slice reported in Tables 10-11, and the reduced sweep the expensive runs
@@ -106,10 +103,8 @@ CV_FOLDS = 5
 # notebooks glob for those file names.
 LEGACY_METRICS = ["precision", "f1", "AUC_ROC", "AUC_PR"]
 
-# Column order of the tidy result frame. ``fold`` is 0..n_splits-1 for a
-# per-fold CV row, -1 for a pooled out-of-fold row, and NaN for a single-split
-# run: metric_records builds each row from a context dict, so a caller that
-# passes no ``fold`` yields NaN once a DataFrame is built from mixed records.
+# Column order of the tidy result frame; see the module docstring's "Folds"
+# section for what the ``fold`` values mean.
 RECORD_COLUMNS = [
     "dataset", "direction", "model", "features",
     "cutoff", "target", "seed", "fold",
@@ -261,9 +256,8 @@ def model_scores(clf, X):
     if hasattr(clf, "predict_proba") and not is_outlier_detector(clf):
         proba = clf.predict_proba(X)
         if proba.shape[1] == 1:
-            # Only one class present at fit time: no ranking information.
-            # Return that class so the caller fails on the metric, with a
-            # readable message, rather than on an index error here.
+            # Only one class seen at fit time: return it so the caller fails
+            # on the metric with a readable message, not an index error here.
             return np.full(proba.shape[0], float(clf.classes_[0]))
         return proba[:, 1]
 

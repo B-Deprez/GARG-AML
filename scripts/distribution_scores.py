@@ -23,25 +23,20 @@ RESULTS_DIR = resolve_results_dir()
 
 # Per-fold breakdown of the base GARG-AML score. The score is deterministic
 # and nothing is fitted, so the pooled out-of-fold value equals the
-# full-population value by construction and the per-fold spread is pure
-# evaluation-slice noise -- the noise floor against which the tree/boost fold
-# spread is read.
+# full-population value by construction, and the per-fold spread is pure
+# evaluation-slice noise -- the noise floor the tree/boost fold spread is
+# read against. The partition is read from results/<dataset>_folds.csv
+# (written by gargaml_tree.py, N_FOLDS >= 2), never re-derived, so the base
+# score is paired fold for fold with the tree models and GraphSAGE.
 #
-# The partition is read from results/<dataset>_folds.csv (written by
-# gargaml_tree.py with N_FOLDS >= 2), never re-derived, so the base score is
-# paired fold for fold with the tree models and GraphSAGE.
-#
-# Set to False to skip the per-fold rows entirely. It also falls back on its
-# own whenever no partition exists, which is the normal state for the
-# synthetic grid and for an IBM run made with N_FOLDS = 0. In every un-folded
-# case the full-population numbers below are computed and written as usual.
+# Set to False to skip the per-fold rows. Also falls back on its own when no
+# partition exists (the synthetic grid, or an IBM run with N_FOLDS = 0);
+# full-population numbers are still written either way.
 USE_FOLDS = True
 
-# This file's convention for "not available" is -1, not NaN: results are logged
-# as repr()'d Python literals in free-text files and read back with a bare
-# eval() in notebooks/VisualisationResults.ipynb, which has no `nan` name bound
-# in scope. The raw GARG-AML score has no natural 0/1 prediction (range
-# [-1, 1], not a probability), so evaluate_scores reports precision/f1 as NaN;
+# This file's convention for "not available" is -1, not NaN: results are
+# logged as repr()'d Python literals and read back with a bare eval() in
+# notebooks/VisualisationResults.ipynb, which has no `nan` name in scope.
 # _sanitise substitutes -1 before anything gets str()'d into a log line.
 def _sanitise(value):
     return -1 if isinstance(value, float) and np.isnan(value) else value
@@ -54,7 +49,7 @@ def divergence_metric(dist_0, dist_1):
     return (mean_0 - mean_1)**2 + 0.5*(variance_0 + variance_1)
 
 def lift_curve_values(y_val, y_pred, steps):
-    vals_lift = [] #The lift values to be plotted
+    vals_lift = []
 
     df_lift = pd.DataFrame()
     df_lift['Real'] = y_val
@@ -114,18 +109,13 @@ def distribution_scores_IBM_plots(dataset, results_df, str_directed, str_supervi
 
             results_df["Label"] = labels
         
-            # Filter the DataFrame by label
             label_0 = results_df[results_df["Label"] == 0]["GARGAML"]
             label_1 = results_df[results_df["Label"] == 1]["GARGAML"]
 
-            # Calculate the bin edges
             all_data = np.concatenate([label_0, label_1])
             bins = np.histogram_bin_edges(all_data, bins=20)
 
-            # Plot histogram for label 0
             axes[i, j].hist(label_0, bins=bins, alpha=0.5, label='Label 0', density=True)
-
-            # Plot histogram for label 1
             axes[i, j].hist(label_1, bins=bins, alpha=0.5, label='Label 1', density=True)
 
             divergence = divergence_metric(label_0, label_1)
@@ -314,17 +304,12 @@ def distribution_scores_IBM(dataset, results_df, str_directed, str_supervised):
             records += _fold_records(labels_gargaml_full, y_true, folds_df,
                                      cut_off, column, context)
 
-            # Elements after index 3 (the ranking metrics, in the fixed order
-            # metric_names() returns) are safe: VisualisationResults.ipynb
-            # reads results[0..3] by position, not by unpacking a
-            # fixed-length tuple. What is not safe is a nested dict or any
-            # other ':' here: that notebook cell finds the data with
-            # line.split(': ', maxsplit=3), so more than 3 occurrences of
-            # ': ' anywhere on the line truncate it before the real list. A
-            # flat list of plain numbers has none. Nor a third '_' in the
-            # label text: that same cell parses the whole line with
-            # line.split('_'), so an extra underscore anywhere shifts every
-            # index after it.
+            # Fragile log format, read by VisualisationResults.ipynb: that
+            # notebook finds the list with line.split(': ', maxsplit=3), so
+            # a 4th ': ' anywhere on the line (e.g. a nested dict) truncates
+            # it before the real data -- a flat list of numbers has none.
+            # It then parses the whole line with line.split('_'), so an
+            # extra '_' in the label text shifts every index after it.
             with open(RESULTS_DIR+'/results_performance_IBM_'+str_directed+'.txt', 'a') as f:
                 f.write(dataset+'_'+column+'_'+str(cut_off)+' [precision, F1, AUC-ROC, AUC-PR, then '
                         +'ranking metrics in a fixed order, see evaluation.py]: '
@@ -343,26 +328,18 @@ def plot_distribution_synthetic(laundering_combined, columns, str_directed, str_
     fig, axes = plt.subplots(n//2, n//2+n%2, figsize = (3*n, 1.5*n))
 
     for i in range(n):
-        # Distributions
-
         column = columns[i]
         laundering_combined["Label"] = laundering_combined[column].values
 
-        # Filter the DataFrame by label
         label_0 = laundering_combined[laundering_combined["Label"] == 0]["GARGAML"]
         label_1 = laundering_combined[laundering_combined["Label"] == 1]["GARGAML"]
 
-        # Calculate the bin edges
         all_data = np.concatenate([label_0, label_1])
         bins = np.histogram_bin_edges(all_data, bins=20)
 
-        # Plot histogram for label 0
         axes[i//2, i%2].hist(label_0, bins=bins, alpha=0.5, label='Other', density=True)
-
-        # Plot histogram for label 1
         axes[i//2, i%2].hist(label_1, bins=bins, alpha=0.5, label=column, density=True)
 
-        # Add labels and title
         axes[i//2, i%2].legend()
         axes[i//2, i%2].set_xlabel('GARG-AML score')
         axes[i//2, i%2].set_ylabel('Relative Frequency')
@@ -398,14 +375,11 @@ def distribution_scores_synthetic(dataset, results_df, str_directed, str_supervi
 
     Cross-validation is scoped to the IBM data: the 66 synthetic datasets
     keep the single split, and their variance comes from the 66-dataset
-    spread that feeds the Friedman/Nemenyi analysis. There is no partition
-    to read here, so the evaluation is over the full population.
+    spread that feeds the Friedman/Nemenyi analysis, so evaluation here is
+    over the full population.
 
     The returned list length is load-bearing and must stay 4 (see the
-    comment on the ``results[column]`` assignment below). The smallest
-    datasets are 100 nodes, well under the smallest alert size, which the
-    shared ``ranking_metrics`` handles by clamping K to the population;
-    those metrics are not carried in this return value.
+    comment on the ``results[column]`` assignment below).
     """
     columns = ['laundering', 'separate', 'new_mules', 'existing_mules']
     label_data = pd.read_csv("data/label_data_"+dataset+".csv")
@@ -431,10 +405,9 @@ def distribution_scores_synthetic(dataset, results_df, str_directed, str_supervi
             print("    skipped: "+repr(exc))
             precision = f1 = auc_roc = auc_pr = -1
 
-        # Length fixed at exactly 4: notebooks/VisualisationResults.ipynb's
-        # gargaml_results() unpacks this list as `precision, f1_score, ROC,
-        # PR = tuple(...)`, so a 5th element would raise there on every line
-        # and silently zero out the whole row.
+        # Fixed at exactly 4: notebooks/VisualisationResults.ipynb's
+        # gargaml_results() unpacks this as `precision, f1_score, ROC, PR =
+        # tuple(...)`, so a 5th element raises there on every line.
         results[column] = [precision, f1, auc_roc, auc_pr]
         print("Precision: ", precision)
         print("F1: ", f1)
@@ -475,15 +448,15 @@ def benchmark_synthetic(
     str_directed = "directed" if directed else "undirected"
     str_supervised = "supervised" if supervised else "unsupervised"
 
-    n_nodes_list = [100, 10000, 100000] # Number of nodes in the graph
-    m_edges_list = [1, 2, 5] # Number of edges to attach from a new node to existing nodes
-    p_edges_list = [0.001, 0.01] # Probability of adding an edge between two nodes
+    n_nodes_list = [100, 10000, 100000]
+    m_edges_list = [1, 2, 5] # BA/WS: edges attached per new node
+    p_edges_list = [0.001, 0.01] # ER/WS: edge probability
     generation_method_list = [
         'Barabasi-Albert', 
         'Erdos-Renyi', 
         'Watts-Strogatz'
-        ] # Generation method for the graph
-    n_patterns_list = [3, 5] # Number of smurfing patterns to add
+        ]
+    n_patterns_list = [3, 5]
 
     for n_nodes in n_nodes_list:
         for n_patterns in n_patterns_list:

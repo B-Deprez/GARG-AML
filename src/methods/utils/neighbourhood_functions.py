@@ -57,8 +57,7 @@ def GARG_AML_nodeselection_undirected(G_ego_second, node):
     for n in nodes_1:
         nodes_2.remove(n)
 
-    # Block order for the undirected score: the node grouped with its
-    # second-order neighbours, then the first-order neighbours.
+    # Block order for the undirected score: node + 2nd-order, then 1st-order neighbours.
     nodes_ordered = [node] + nodes_2 + nodes_1
         
     return nodes_1, nodes_2, nodes_ordered

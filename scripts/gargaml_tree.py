@@ -49,12 +49,11 @@ from sklearn import ensemble
 
 from pickle import dump
 
-# Datasets to run, smallest first: a plain name is the full graph, "_bank<b>"
-# / "_banktop<k>" a single-institution view, "_res<r>" a Louvain resolution,
-# "_nolouvain" no reduction at all and "_hubs<k>" hub removal instead of
-# Louvain (see src/utils/graph_processing). Each entry overwrites its own
-# result files in place, and one whose stage-1 measures are missing is skipped
-# rather than failing, so entries can be commented out freely. LI-Large and
+# Datasets to run, smallest first. Suffixes: "_bank<b>"/"_banktop<k>" a
+# single-institution view, "_res<r>" a Louvain resolution, "_nolouvain" no
+# reduction, "_hubs<k>" hub removal instead of Louvain (see
+# src/utils/graph_processing). An entry with no stage-1 measures on disk is
+# skipped, not failed, so entries can be commented out freely. LI-Large and
 # the no-Louvain arms are the expensive runs.
 DATASETS = ["HI-Small_bank012", "HI-Small_banktop50",
             "HI-Small_res1", "HI-Small_res5",
@@ -64,15 +63,14 @@ DATASETS = ["HI-Small_bank012", "HI-Small_banktop50",
             "HI-Small_nolouvain", "LI-Large_nolouvain",
             "HI-Small_hubs5", "HI-Small_hubs10", "HI-Small_hubs100"]
 
-# The pattern targets swept for every dataset and feature config. The matching
-# label cut-offs come from src/utils/evaluation.py rather than being declared
-# here: one canonical list, imported by every script that sweeps labels.
+# Pattern targets swept for every dataset/feature config. Label cut-offs live
+# in src/utils/evaluation.py instead -- one canonical list, imported everywhere.
 TARGET_COLUMNS = ['Is Laundering', 'FAN-OUT', 'FAN-IN', 'GATHER-SCATTER', 'SCATTER-GATHER', 'CYCLE', 'RANDOM', 'BIPARTITE', 'STACK']
 
 # Per-dataset reductions of that sweep, keyed by the *underlying* dataset so a
-# bank view inherits its base's settings. LI-Large runs the headline cut-offs
-# only, matching what scripts/graphsage_baseline.py does there so the two
-# models stay comparable cell for cell.
+# bank view inherits its base's settings. LI-Large runs headline cut-offs
+# only, matching graphsage_baseline.py so the two models stay comparable
+# cell for cell.
 DATASET_SETTINGS = {
     "LI-Large": dict(cut_offs=HEADLINE_CUTOFFS),
 }
@@ -88,11 +86,11 @@ def dataset_settings(dataset):
     return (overrides.get("cut_offs", CUT_OFFS),
             overrides.get("targets", TARGET_COLUMNS))
 
-# 0 = a single 70/30 stratified holdout: holdout_split, one fit per model, no
-# fold column. >=2 = that many stratified folds: cv_splits, a pooled
-# out-of-fold pass per model, and the fold-std companion matrices. Both modes
-# write the same filenames, so switching this and rerunning overwrites the
-# other mode's output -- copy results/ aside to keep both on disk at once.
+# 0 = single 70/30 stratified holdout (holdout_split, no fold column). >=2 =
+# that many stratified folds (cv_splits, pooled out-of-fold pass, fold-std
+# companion matrices). Both modes write the same filenames, so switching this
+# and rerunning overwrites the other mode's output -- copy results/ aside to
+# keep both.
 N_FOLDS = 5
 
 # Slurm overrides; the constants above remain the documented defaults.
@@ -100,12 +98,11 @@ DATASETS = select_datasets(DATASETS)
 N_FOLDS = env_override("n_folds", N_FOLDS, int)
 RESULTS_DIR = resolve_results_dir()
 
-# Cross-validation is scoped to the IBM data. The 66 synthetic datasets keep
-# the single 70/30 holdout: their variance is the spread across the grid, and
-# the Friedman/Nemenyi test is specified over that N, so folding them would
-# not be a cheaper version of the same analysis. select_datasets takes
-# GARGAML_DATASET verbatim, which is the one way a synthetic name can reach
-# this script -- refuse it here rather than at the missing _Trans.csv.
+# CV is scoped to IBM data; the 66 synthetic datasets keep the single 70/30
+# holdout because the Friedman/Nemenyi test is specified over that N=66, so
+# folding them isn't a cheaper version of the same analysis. GARGAML_DATASET
+# is the one way a synthetic name reaches this script -- refuse it here
+# rather than at the missing _Trans.csv.
 _synthetic = [d for d in DATASETS if d.startswith("synthetic")]
 if _synthetic:
     raise ValueError(
@@ -120,9 +117,8 @@ DEFAULT_BOOST_SAVE_PATH = RESULTS_DIR+"/model_boosting.pkl"
 
 def gargaml_tree(X, y, save = False, save_path = None):
     save_path = save_path or DEFAULT_TREE_SAVE_PATH
-    # random_state is required, not cosmetic: sklearn permutes features at every
-    # split, so when two splits tie on the criterion the winner is drawn at
-    # random and an unseeded tree is not reproducible run to run.
+    # random_state is required, not cosmetic: sklearn breaks tied splits at
+    # random, so an unseeded tree is not reproducible run to run.
     clf = tree.DecisionTreeClassifier(min_samples_leaf=10, random_state=1997)
     clf = clf.fit(X, y)
 
@@ -150,62 +146,56 @@ def measures_path(dataset, directed):
 def available_directions(dataset):
     """Directions of ``dataset`` whose stage-1 measures are actually on disk.
 
-    This script is stage 2 of a decoupled pipeline: it reads what
-    gargaml_directed.py / gargaml_undirected.py wrote. A dataset listed in
-    DATASETS whose measures were never computed -- a bank view is the usual
-    case, since the measure scripts have to be run on the view name first --
-    is reported and skipped, so the loop carries on with the datasets that
-    are ready.
+    This script is stage 2 of a decoupled pipeline reading what
+    gargaml_directed.py / gargaml_undirected.py wrote. A dataset whose
+    measures were never computed -- a bank view not yet run through stage 1
+    is the usual case -- is reported and skipped, not failed.
     """
     return [d for d in [False, True] if os.path.exists(measures_path(dataset, d))]
 
 def reduced_graph(dataset):
     """The Louvain-reduced graph the neighbourhood summaries are computed on.
 
-    Built from the undirected transaction graph whichever measures CSV is
-    being scored, so it is identical across the directed and undirected
-    passes -- build it once in the caller and hand it to both.
+    Built from the undirected transaction graph, so it is identical across
+    the directed and undirected passes -- build it once in the caller and
+    hand it to both.
     """
     base, banks = parse_view(dataset)  # None for the full graph
     G = construct_IBM_graph(path = trans_path(dataset), directed = False, banks = banks)
     # Same pre-processing stage 1 used, read back out of the dataset name, so
-    # the neighbourhood features match the measures they are joined to. dataset
-    # is not passed on: stage 1 already logged the severance and this would
-    # duplicate the row.
+    # neighbourhood features match the measures they're joined to. dataset is
+    # not passed on: stage 1 already logged the severance, avoiding a duplicate row.
     return reduce_graph(G, parse_resolution(dataset)[1], results_dir=RESULTS_DIR,
                         hubs=parse_hubs(dataset))
 
 def data_preparation(dataset, feature_cols, directed, score_type, G_reduced = None):
     """Build one feature table holding every column in ``feature_cols``.
 
-    ``feature_cols`` is the *union* over the feature configs that will be
-    run (see src/utils/features.py), so the graph is built and Louvain is
-    run once for all of them.
+    ``feature_cols`` is the *union* over the feature configs that will run
+    (see src/utils/features.py), so the graph and Louvain run once for all
+    of them.
 
     Pass ``G_reduced`` to reuse a graph already built by :func:`reduced_graph`
-    (it does not depend on ``directed``); leave it ``None`` to build on
-    demand, which is what a single-config caller wants.
+    (it does not depend on ``directed``); leave it ``None`` to build on demand.
     """
     str_directed = "directed" if directed else "undirected"
     base, banks = parse_view(dataset) #None for the full graph
-    # Expand a group spec ("top50") into its member banks before anything
-    # filters on it: bank_clients matches against the bank column and would
-    # otherwise select nobody. resolve_banks caches per (path, spec).
+    # Expand a group spec ("top50") into member banks before filtering: bank_clients
+    # matches the bank column and would otherwise select nobody. Cached per (path, spec).
     banks = resolve_banks(banks, trans_path(dataset))
 
-    results_df_measures = pd.read_csv(measures_path(dataset, directed)) #measures
+    results_df_measures = pd.read_csv(measures_path(dataset, directed))
 
-    results_df = define_gargaml_scores(results_df_measures, directed, score_type=score_type) #summary scores
+    results_df = define_gargaml_scores(results_df_measures, directed, score_type=score_type)
 
-    # Group (b) is already in the measures frame, so carrying the block
-    # densities and sizes costs one join rather than a second read. Group
-    # membership decides which columns come from here, not what the CSV
-    # happens to be called.
+    # Group (b) is already in the measures frame, so this costs one join
+    # rather than a second read. Group membership decides the columns, not
+    # the CSV name.
     block_columns = [c for c in feature_cols if c in feature_groups(directed)["b"]]
     if block_columns:
         results_df = results_df.join(results_df_measures.set_index("node")[block_columns])
 
-    transactions_df_extended, pattern_columns = define_ML_labels( #patterns
+    transactions_df_extended, pattern_columns = define_ML_labels(
         path_trans = trans_path(dataset),
         path_patterns = patterns_path(dataset),
         banks = banks
@@ -223,23 +213,20 @@ def data_preparation(dataset, feature_cols, directed, score_type, G_reduced = No
     laundering_combined, _, _ = summarise_ML_labels(transactions_df_extended,pattern_columns)
 
     if banks is not None:
-        # A bank alerts on its own customers, so they are the evaluated
-        # population -- not the external counterparties, which stay in the
-        # graph as neighbours but are not scored. This also keeps the labels
-        # honest: a bank sees every transaction of its own clients, so their
-        # propensities here equal the full-data ones and only the features
-        # differ. Restricting before combine_patterns_GARGAML also spares it
-        # the dropped accounts.
+        # A bank alerts on its own customers, so they're the evaluated
+        # population -- external counterparties stay in the graph as
+        # neighbours but aren't scored. This also keeps labels honest: a bank
+        # sees every transaction of its own clients, so propensities here
+        # equal the full-data ones and only the features differ.
         clients = bank_clients(transactions_df_extended, banks)
         laundering_combined = laundering_combined[laundering_combined.index.isin(clients)]
         print("  bank view: "+str(len(laundering_combined))+" client accounts evaluated")
 
     hubs = parse_hubs(dataset)
     if hubs is not None:
-        # Hub removal is the one arm that deletes accounts from the graph, so
-        # the hubs have no score. They are dropped rather than left at the -2
-        # sentinel combine_patterns_GARGAML gives an unscored account, which
-        # would rank them below every scored one on a score they never got.
+        # Hub removal deletes accounts from the graph, so hubs have no score.
+        # Dropped rather than left at the -2 "unscored" sentinel, which would
+        # rank them below every scored account on a score they never got.
         scored = laundering_combined.index.isin(results_df.index)
         dropped = laundering_combined[~scored]
         laundering_combined = laundering_combined[scored]
@@ -258,10 +245,10 @@ def data_preparation(dataset, feature_cols, directed, score_type, G_reduced = No
 def _fit_and_record(X_train, y_train, X_test, y_test, models, context):
     """Fit every model on one train/test partition and return its records.
 
-    Shared by both of run_config's modes: the single 70/30 split (N_FOLDS=0)
-    calls this once per (cutoff, target); cross-validation calls it once per
-    fold. Also returns each model's test-set scores/predictions, indexed by
-    account, which is what pools the CV folds into one out-of-fold pass.
+    Shared by both of run_config's modes: the single split (N_FOLDS=0) calls
+    this once per (cutoff, target); CV calls it once per fold. Also returns
+    each model's test-set scores/predictions, indexed by account, used to
+    pool CV folds into one out-of-fold pass.
     """
     n_test = len(y_test)
     n_pos = int(y_test.sum())
@@ -272,7 +259,7 @@ def _fit_and_record(X_train, y_train, X_test, y_test, models, context):
 
     scores, preds = {}, {}
     for model_key, fit_model in models:
-        try: # If too few labels, the model will not work. The cell is reported as NaN, with the reason
+        try: # Too few labels and the model fails; reported as NaN with the reason
             clf = fit_model(X_train, y_train)
             metrics = evaluate_model(clf, X_test, y_test)
             scores[model_key] = pd.Series(model_scores(clf, X_test), index=X_test.index)
@@ -294,12 +281,11 @@ def write_fold_partition(laundering_combined, dataset, cut_offs, targets, n_spli
     """Persist the N_FOLDS partition once.
 
     The split for a given (cutoff, target) depends only on the label vector,
-    ``n_splits`` and the seed -- not on which feature config or direction
-    trains on it -- so this is called once from main(), and run_config's own
-    cv_splits calls reproduce the exact same partition deterministically
-    without needing to share any state with this function. ``n_splits`` must
-    be the same N_FOLDS run_config is using, or the persisted file would
-    silently describe a different partition than the one actually trained on.
+    ``n_splits`` and the seed -- not on feature config or direction -- so this
+    runs once from main(), and run_config's own cv_splits calls reproduce the
+    same partition deterministically. ``n_splits`` must match the N_FOLDS
+    run_config uses, or the persisted file silently describes a different
+    partition than what was trained on.
     """
     rows = []
     for cutoff in cut_offs:
@@ -320,15 +306,14 @@ def run_config(laundering_combined, dataset, directed, config, seed=SEED,
                cut_offs=None, targets=None):
     """Train and evaluate both models on one feature config.
 
-    The feature config is the only thing that varies: the split, the
-    cut-off/target sweep and the estimators are identical, which is what
-    makes the ablation readable. Results go to the ``config``-specific
-    suffix, and ``full`` writes the unsuffixed filenames.
+    The feature config is the only thing that varies -- split, sweep and
+    estimators are identical, which is what makes the ablation readable.
+    Results go to the ``config``-specific suffix; ``full`` writes the
+    unsuffixed filenames.
 
-    ``cut_offs`` / ``targets`` default to whatever
-    :func:`dataset_settings` resolves for ``dataset``, so a caller that
-    does not care (scripts/gargaml_tree_blocks.py) picks up a per-dataset
-    reduction automatically instead of silently running the full grid.
+    ``cut_offs``/``targets`` default to :func:`dataset_settings` for
+    ``dataset``, so a caller that doesn't care (gargaml_tree_blocks.py)
+    picks up a per-dataset reduction automatically.
     """
     str_directed = "directed" if directed else "undirected"
     suffix = config_suffix(config)
@@ -358,24 +343,18 @@ def run_config(laundering_combined, dataset, directed, config, seed=SEED,
     records = []
 
     # Iterate the *full* default grid and skip what this dataset's sweep
-    # leaves out, rather than iterating the reduced sweep directly. Two
-    # reasons, both about the metric matrices:
-    #   * write_metric_matrices takes its row/column order from the values
-    #     actually present, and VisualisationResults.ipynb indexes those
-    #     files with df.loc[cut_off][pattern] over the full cut-off list, so
-    #     a reduced sweep is a KeyError there, not a smaller table.
-    #   * a cell that was never attempted is a gap like any other, and gaps
-    #     are reported rather than dropped. It goes through the same
-    #     nan_metrics() path as a too-few-positives cell, with a status that
-    #     says which of the two it was.
+    # leaves out, rather than iterating the reduced sweep directly:
+    #   * write_metric_matrices orders rows/columns by the values present, and
+    #     VisualisationResults.ipynb indexes df.loc[cut_off][pattern] over the
+    #     full cut-off list -- a reduced sweep would KeyError there.
+    #   * an unattempted cell is a gap like any other, reported rather than
+    #     dropped, via the same nan_metrics() path as a too-few-positives cell.
     for cutoff in CUT_OFFS:
         for target in TARGET_COLUMNS:
             context = dict(
                 dataset = dataset,
                 direction = str_directed,
-                features = config, # which column groups the models see; see
-                                    # src/utils/features.py for what each config
-                                    # holds
+                features = config, # column groups the models see; see src/utils/features.py
                 cutoff = cutoff,
                 target = target,
                 seed = seed,
@@ -437,8 +416,8 @@ def run_config(laundering_combined, dataset, directed, config, seed=SEED,
                         oof_preds[model_key].loc[X_test.index] = preds[model_key]
 
             # Pooled out-of-fold pass (fold=-1): one row per model, ranked over
-            # the whole population rather than a single fold's slice, which is
-            # the population the alert-queue ranking metrics are defined on.
+            # the whole population -- the population the alert-queue ranking
+            # metrics are defined on.
             pooled_context = dict(context, fold=-1)
             for model_key, _ in models:
                 scores, preds = oof_scores[model_key], oof_preds[model_key]
@@ -466,14 +445,13 @@ def run_dataset(dataset):
     configs = list(FEATURE_CONFIGS) # full, blocks, topology, all
 
     # Resolved once and threaded everywhere, so the persisted fold partition
-    # covers exactly the (cutoff, target) cells that will be trained on. A
-    # partition written over the full grid while the models run a reduced one
-    # would describe folds nothing reads, and GraphSAGE reads this file.
+    # covers exactly the cells trained on -- a partition over the full grid
+    # while models run a reduced one would describe folds nothing reads, and
+    # GraphSAGE reads this file.
     cut_offs, targets = dataset_settings(dataset)
 
-    # Stage 1 must have run on this dataset name -- including on a bank view's
-    # name, which is a dataset of its own. Checked before the graph is built,
-    # which is the expensive part.
+    # Stage 1 must have run on this dataset name, including a bank view's own
+    # name. Checked before the (expensive) graph build.
     directions = available_directions(dataset)
     if not directions:
         print("\n### "+dataset+" -- SKIPPED: no block measures on disk ("
@@ -485,10 +463,9 @@ def run_dataset(dataset):
             print("\n### "+dataset+" ("+("directed" if directed else "undirected")
                   +") -- SKIPPED: "+measures_path(dataset, directed)+" not found ###")
 
-    # Record what every estimator is configured with, and that none of it is
-    # searched or selected on the test split. Written up front rather than at
-    # the end, so an interrupted run still documents the configuration its
-    # partial results came from.
+    # Record what every estimator is configured with, confirming nothing is
+    # searched/selected on the test split. Written up front so an interrupted
+    # run still documents the config its partial results came from.
     print("hyperparameters -> "+write_hyperparameters(dataset, results_dir=RESULTS_DIR))
 
     # The reduced graph does not depend on the direction, so it is built
@@ -517,10 +494,9 @@ def run_dataset(dataset):
         str_directed = "directed" if directed else "undirected"
 
         # A direction-free config (topology) has an identical feature matrix
-        # in both passes. Running it twice would refit the same matrix and
-        # write a second set of result files implying a directed/undirected
-        # distinction that does not exist, so it runs once and is announced
-        # as skipped rather than silently dropped.
+        # in both passes. Running it twice would write a second set of result
+        # files implying a directed/undirected distinction that doesn't
+        # exist, so it runs once and is announced as skipped, not dropped.
         todo = [c for c in configs if c not in done]
         for config in configs:
             if config in done:
@@ -535,9 +511,9 @@ def run_dataset(dataset):
             G_reduced = G_reduced
             )
 
-        # The account population and its order are identical regardless of
-        # direction (see write_fold_partition), so the partition only needs
-        # writing once, from whichever laundering_combined is built first.
+        # The account population and order are identical regardless of
+        # direction (see write_fold_partition), so the partition is written
+        # once, from whichever laundering_combined is built first.
         if N_FOLDS >= 2 and not fold_partition_written:
             path = write_fold_partition(laundering_combined, dataset, cut_offs, targets, N_FOLDS)
             print("  folds -> "+path)

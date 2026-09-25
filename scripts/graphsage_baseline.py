@@ -104,11 +104,10 @@ DATASETS = {
     ),
 }
 
-# May be a plain dataset or a single-bank view, e.g. "HI-Small_bank012". A
-# view reads data/HI-Small_Trans.csv filtered to that bank, evaluates the
-# bank's own clients, and needs its own results/<view>_folds.csv, so run
-# gargaml_tree.py on the same view name first. One dataset per invocation:
-# views are run by setting this and resubmitting.
+# May be a plain dataset or a single-bank view, e.g. "HI-Small_bank012" -- a
+# view evaluates that bank's own clients and needs its own
+# results/<view>_folds.csv, so run gargaml_tree.py on the same view name
+# first. One dataset per invocation: set this and resubmit for a view.
 DATASET = "HI-Small"
 CONFIGS = list(FEATURE_CONFIGS)  # topology, attributes
 
@@ -116,10 +115,9 @@ EPOCHS = 50       # an upper bound; early stopping decides the real number
 PATIENCE = 5      # epochs without a validation AUC-PR improvement
 CHECKPOINT_DIR = "results/checkpoints"
 
-# Slurm overrides; the constants above remain the documented defaults.
-# CHECKPOINT_DIR defaults to $VSC_SCRATCH on the cluster: checkpoints are
-# transient per-epoch state, and $VSC_DATA is the quota'd volume. Nothing
-# downstream reads them -- only train_fold's own resume does.
+# Slurm overrides. CHECKPOINT_DIR defaults to $VSC_SCRATCH on the cluster --
+# checkpoints are transient per-epoch state, unlike the quota'd $VSC_DATA --
+# and nothing downstream reads them except train_fold's own resume.
 DATASET = env_override("dataset", DATASET)
 CONFIGS = env_override("configs", CONFIGS, as_list)
 RESULTS_DIR = resolve_results_dir()

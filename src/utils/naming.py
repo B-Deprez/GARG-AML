@@ -51,12 +51,11 @@ FEATURE_CONFIG_LABELS: dict[str, str] = {
     "all":    " (all features)",
 }
 
-# ``topology`` is the exception and gets its own base name. That config
-# contains **no GARG-AML signal at all** -- neighbour-degree statistics
-# only -- so labelling it "GARG-AML ..." would misrepresent the ablation,
-# whose point is what the tree achieves *without* GARG-AML. It is also
-# direction-free (degrees come from the undirected reduced graph either
-# way), so the Undir./Dir. distinction is dropped from the label.
+# ``topology`` is the exception and gets its own base name: it contains
+# **no GARG-AML signal at all** (neighbour-degree stats only), so labelling
+# it "GARG-AML ..." would misrepresent an ablation about what the tree
+# achieves *without* GARG-AML. It is also direction-free, so the
+# Undir./Dir. distinction is dropped from the label too.
 TOPOLOGY_DISPLAY_NAMES: dict[str, str] = {
     "gargaml_tree_u":  "Degree-only Tree",
     "gargaml_tree_d":  "Degree-only Tree",

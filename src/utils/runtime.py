@@ -22,8 +22,8 @@ out-of-range index rather than running nothing, since an array task that exits
 
 ``write_csv`` is here rather than in ``evaluation.py`` because stage 1 needs it
 too and does not import that module. A plain ``df.to_csv(final_path)`` killed
-on wall time leaves a truncated CSV at the real filename, which every reader
-downstream parses happily as a short file and which the skip-if-exists resume
+on wall time leaves a truncated CSV at the real filename -- which downstream
+readers parse happily as a short file, and which the skip-if-exists resume
 (``GARGAML_FORCE``) would treat as finished work.
 """
 
@@ -193,11 +193,10 @@ def timing_path(dataset, direction, results_dir="results"):
     """Per-task timing file under ``results/timing/``.
 
     One file per task, because ``results/time_results_*.txt`` is opened in
-    append mode and shared by three scripts, which under an array job is a
-    race and is unattributable afterwards: a row there is ``<dataset>:
-    <seconds>`` with no job, host, worker count or date. That file keeps
-    being appended to as well, so notebooks/VisualisationRunTime.ipynb reads
-    it unchanged.
+    append mode and shared by three scripts -- a race under an array job,
+    and unattributable afterwards since a row there is just ``<dataset>:
+    <seconds>`` with no job, host, worker count or date. That file is left
+    unchanged, so notebooks/VisualisationRunTime.ipynb still reads it fine.
     """
     directory = os.path.join(results_dir, "timing")
     os.makedirs(directory, exist_ok=True)

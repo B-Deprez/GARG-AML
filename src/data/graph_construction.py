@@ -11,12 +11,12 @@ def construct_IBM_graph(path="data/HI-Small_Trans.csv", directed=False, banks=No
     transactions booked at one of those banks are kept, i.e. those with at
     least one endpoint among its clients. ``None`` is the full graph.
     """
-    banks = resolve_banks(banks, path) #expands a group spec such as "top50"
+    banks = resolve_banks(banks, path)  # expands a group spec such as "top50"
 
     # Bank identifiers are zero-padded and infer as int64 ("010" -> 10), so
-    # they are forced to str when -- and only when -- a view is being built.
-    # The account columns keep their inferred dtype: they are the node keys,
-    # and changing how they are read would change node identity.
+    # they're forced to str only when a view is being built. Account columns
+    # keep their inferred dtype -- they're the node keys, and reading them
+    # differently would change node identity.
     dtype = {c: str for c in BANK_COLUMNS} if banks is not None else None
 
     data = pd.read_csv(path, dtype=dtype)

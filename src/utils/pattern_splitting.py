@@ -62,11 +62,9 @@ INSTANCE_COLUMNS = [
 def instance_edges(instances):
     """``{instance: (pattern_type, [(source, target), ...])}``, deduplicated.
 
-    An attempt is a set of *transactions*, and several of them can run
-    between the same pair of accounts. The graph collapses parallel
-    transactions into one edge, so the diagnostic has to as well -- counting
-    transactions would weight an attempt by how often its accounts
-    transacted rather than by its structure.
+    The graph collapses parallel transactions between a pair of accounts
+    into one edge, so this does too -- counting transactions would weight an
+    attempt by how often its accounts transacted rather than by its structure.
     """
     grouped = {}
     for instance, rows in instances.groupby("instance"):
@@ -133,8 +131,8 @@ def analyse_instance(pattern_type, edges, nodes, communities):
         "edge_survival": len(edges_kept) / len(edges) if edges else np.nan,
         "paths_total": len(paths),
         "paths_kept": len(paths_kept),
-        # NaN, not 0: a one-hop pattern (FAN-OUT, FAN-IN) has no 2-path to
-        # lose, and reporting it as fully destroyed would be a fabrication.
+        # NaN, not 0: a one-hop pattern has no 2-path to lose, so "fully
+        # destroyed" would be a fabrication.
         "path_survival": len(paths_kept) / len(paths) if paths else np.nan,
         "detectable_before": bool(paths),
         "detectable_after": bool(paths_kept),

@@ -337,9 +337,8 @@ def diagnose_node(node, G, G_und, G_rev):
     f0, f1, f2 = levels_flow_split(split)
     flow_split = eq_14(measures_for_levels(G_ego, f0, f1, f2))
 
-    # Recomputed from scratch on the de-reciprocated ego graph, levels
-    # included: removing edges changes directed reachability, so reusing the
-    # earlier levels would mix the two effects.
+    # Recomputed from scratch, levels included: removing edges changes
+    # reachability, so reusing the earlier levels would mix the two effects.
     H = drop_reciprocal(G_ego)
     H_split = reachability_split(node, H, G_ego_und, H.reverse(copy=True))
     h0, h1, h2 = levels_published(H_split)
@@ -361,8 +360,7 @@ def diagnose_node(node, G, G_und, G_rev):
 
     row = {
         "node": node,
-        # Level census; an empty level 2 is flagged separately, since the
-        # empty-block conventions only bite there.
+        # Level census; empty_level2 flagged separately since the empty-block conventions only bite there.
         "n_level0": len(nodes_0),
         "n_level1": len(nodes_1),
         "n_level2": len(nodes_2),
@@ -372,7 +370,6 @@ def diagnose_node(node, G, G_und, G_rev):
         "d2_reverse_only": len(split["reverse_only"]),
         "d2_both": len(split["both"]),
         "d2_neither": len(split["neither"]),
-        # Scores.
         "directed": directed,
         "transpose": transpose,
         "max_transpose": max(directed, transpose),

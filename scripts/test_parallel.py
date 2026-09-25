@@ -1,7 +1,6 @@
 # Multiprocessing sanity check, not part of the pipeline: runs the directed
 # measures over the synthetic grid and writes them to
-# results/<dataset>_GARGAML_directed_test.csv.
-# Run from the repository root; all paths below are root-relative.
+# results/<dataset>_GARGAML_directed_test.csv. Run from the repository root.
 import os
 import sys
 import time
@@ -22,15 +21,12 @@ from src.data.graph_construction import construct_synthetic_graph
 from src.utils.graph_processing import graph_community
 from src.methods.GARGAML import GARG_AML_node_directed_measures
 
-# Global variable for worker processes
 graph_for_worker = None
 graph_for_worker_rev = None
 graph_for_worker_undirected = None
 
 def init_worker(graph, graph_rev, graph_undirected):
-    """
-    Initializer for worker processes to set the graph in each subprocess.
-    """
+    """Sets the graph globals in each worker subprocess."""
     global graph_for_worker
     global graph_for_worker_rev
     global graph_for_worker_undirected
@@ -55,22 +51,22 @@ def construct_datasets():
         100, 
         10000, 
         100000
-        ] # Number of nodes in the graph
+        ]
     m_edges_list = [
         1, 
         2, 
         5
-        ] # Number of edges to attach from a new node to existing nodes
+        ] # BA: edges attached per new node
     p_edges_list = [
         0.001, 
         0.01
-        ] # Probability of adding an edge between two nodes
+        ] # ER/WS: edge/rewiring probability
     generation_method_list = [
         'Barabasi-Albert', 
         'Erdos-Renyi', 
         'Watts-Strogatz'
-        ] # Generation method for the graph
-    n_patterns_list = [3, 5] # Number of smurfing patterns to add
+        ]
+    n_patterns_list = [3, 5]
 
     for n_nodes in n_nodes_list:
         for n_patterns in n_patterns_list:
@@ -95,7 +91,6 @@ def construct_datasets():
 
 datasets = construct_datasets()
 directed = True
-# Parallelism: use up to 4 or half of CPUs
 n_cpu = min(4, cpu_count() // 2)
 
 if __name__ == '__main__':
@@ -127,11 +122,9 @@ if __name__ == '__main__':
         elapsed = timeit.default_timer() - start_time
         print(f"Dataset {dataset} completed in {elapsed:.2f} seconds")
 
-        # Log timing
         with open("results/time_results_dir.txt", "a") as f:
             f.write(f"{dataset}: {elapsed:.2f}\n")
 
-        # Save DataFrame
 
         df = pd.DataFrame({
             "node": nodes,

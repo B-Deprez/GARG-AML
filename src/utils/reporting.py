@@ -8,10 +8,10 @@ tables, as LaTeX and as CSV.
 
 Why here and not in ``VisualisationResults.ipynb``
 --------------------------------------------------
-That notebook builds exact filenames for eight hard-coded models and the four
-per-metric matrices, and parses the base scores out of a free-text log with
-``eval()``. The tidy CSV already carries every column these tables need, so
-they are assembled from it in code that can be tested.
+That notebook builds exact filenames for eight hard-coded models and parses
+base scores out of a free-text log with ``eval()``. The tidy CSV already
+carries every column these tables need, so they are assembled from it in
+code that can be tested.
 
 The one thing to know about the schema
 --------------------------------------
@@ -64,10 +64,9 @@ TIDY_PATTERN = re.compile(r"^(?P<dataset>.+)_(?P<direction>undirected|directed)"
                           r"(?P<suffix>.*)_metrics\.csv$")
 
 # scripts/partial_observability.py writes one tidy file per view covering both
-# directions, so it carries a `direction` COLUMN instead of a filename token.
-# A direction-less name has no token to anchor the split the way TIDY_PATTERN's
-# does, and the dataset can itself contain underscores ("HI-Small_bank012"), so
-# the suffix is matched against this list rather than guessed by position.
+# directions, so it carries a `direction` COLUMN instead of a filename token --
+# there is then no token to anchor the split on, so the suffix is matched
+# against this list instead of guessed by position.
 NO_DIRECTION_SUFFIXES = ("partial_observability",)
 NO_DIRECTION_PATTERN = re.compile(
     r"^(?P<dataset>.+)(?P<suffix>_(?:" + "|".join(NO_DIRECTION_SUFFIXES) + r"))"
@@ -272,10 +271,9 @@ def summarise(df, fold_mode="auto", group_keys=GROUP_KEYS):
         mean=("value", "mean"), std=("value", "std"),
         n_test=("n_test", "max"), n_pos=("n_pos", "max"))
 
-    # Which kind of row this cell was built from. Needed downstream, not just
-    # informative: a partial-fold marker is only meaningful for a per-fold
-    # mean, and stamping "1/5" on a single-split or pooled cell would claim
-    # four folds were lost when none were ever expected.
+    # Which kind of row this cell was built from -- needed downstream, since a
+    # partial-fold marker only makes sense for a per-fold mean (stamping
+    # "1/5" on a single-split or pooled cell would misreport folds as lost).
     def _basis(fold):
         if (fold >= 0).any():
             return "per_fold"
@@ -439,15 +437,15 @@ def alert_table(df, dataset, cutoff, target, metric="P@K", alert_sizes=None,
     """The alert-queue table.
 
     One row per model, one column per queue size. Built from the **pooled
-    out-of-fold** rows where they exist: the folds are disjoint, so pooling
-    gives every account a score from a model that never trained on it, and K
-    is then ranked over the whole dataset rather than over a 20 % slice.
-    Without that, P@1000 is a rescaled proxy for an investigator's workload
-    rather than the thing itself.
+    out-of-fold** rows where they exist: since the folds are disjoint,
+    pooling gives every account a score from a model that never trained on
+    it, so K is ranked over the whole dataset rather than a 20% slice -- the
+    difference between P@1000 as an investigator's actual workload and as a
+    rescaled proxy for it.
 
-    The companion to :func:`ties_table`. A decision tree emits few distinct
+    The companion to :func:`ties_table`: a decision tree emits few distinct
     scores, so the top-K set can be decided by sort order inside a tied
-    plateau, and ``ties@K`` is where that shows.
+    plateau, which is what ``ties@K`` flags.
     """
     alert_sizes = ALERT_SIZES if alert_sizes is None else alert_sizes
 
@@ -635,9 +633,9 @@ def severance_pattern_latex(severance, dataset=None, caption=None,
     """The per-pattern severance table, as booktabs LaTeX.
 
     ``severance`` is ``results/preprocessing_severance.csv`` read back. Each
-    cell is the percentage of that pattern's edges the setting discards, so a
-    row is read against the ``All graph edges`` row at the bottom: a pattern
-    losing less than the graph does is one the pre-processing spares.
+    cell is the percentage of that pattern's edges the setting discards, read
+    against the ``All graph edges`` row at the bottom: a pattern losing less
+    than the graph does is one the pre-processing spares.
 
     Written by hand rather than through :func:`to_latex` because the columns
     carry two groups with a ``\\cmidrule`` under each, which

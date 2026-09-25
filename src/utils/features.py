@@ -40,7 +40,6 @@ from __future__ import annotations
 
 import pandas as pd
 
-# Group (a): the aggregated score.
 GROUP_SCORE = ["GARGAML"]
 
 # Group (b): block densities + block sizes, straight out of
@@ -66,7 +65,6 @@ GROUP_DEGREE = [
     "degree", "degree_min", "degree_max", "degree_mean", "degree_std",
 ]
 
-# Group (d): neighbourhood aggregation of the score.
 GROUP_SCORE_STATS = [
     "GARGAML_min", "GARGAML_max", "GARGAML_mean", "GARGAML_std",
 ]
@@ -78,8 +76,7 @@ GROUP_NAMES: dict[str, str] = {
     "d": "neighbour score stats",
 }
 
-# Config name -> ordered group keys. Order matters: it is the order in
-# which the columns reach the estimator.
+# Order matters here: it is the order the columns reach the estimator.
 FEATURE_CONFIGS: dict[str, tuple[str, ...]] = {
     "full":     ("a", "d", "c"),   # the model the paper reports
     "blocks":   ("b",),            # block-only ablation
@@ -87,16 +84,15 @@ FEATURE_CONFIGS: dict[str, tuple[str, ...]] = {
     "all":      ("a", "b", "c", "d"),
 }
 
-# Groups whose columns do *not* change with the direction of the analysis.
-# Groups (a), (b) and (d) derive from the direction-specific measures CSV.
-# Group (c) does not: ``summarise_gargaml_scores`` is handed the *undirected*
-# reduced graph in both cases, so the degree columns are identical between
-# the directed and undirected runs.
+# Groups whose columns do *not* change with direction. (a), (b), (d) derive
+# from the direction-specific measures CSV; (c) does not, because
+# ``summarise_gargaml_scores`` is handed the *undirected* reduced graph
+# either way, so its degree columns match between directed and undirected runs.
 DIRECTION_FREE_GROUPS = frozenset({"c"})
 
-# Groups that need the Louvain-reduced graph. Group (b) comes straight out
-# of the measures CSV, so a blocks-only run skips graph construction and
-# Louvain entirely, which is where the run time goes.
+# Groups that need the Louvain-reduced graph. (b) comes straight out of the
+# measures CSV, so a blocks-only run skips graph construction and Louvain
+# entirely -- which is where the run time goes.
 NEIGHBOURHOOD_GROUPS = frozenset({"a", "c", "d"})
 
 

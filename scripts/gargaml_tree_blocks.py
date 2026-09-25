@@ -43,14 +43,14 @@ CONFIG = "blocks"
 
 
 def main():
-    # Iterate over both directions so one invocation gives the full
-    # ablation grid (undirected + directed x tree + boosting).
+    # Both directions in one invocation gives the full ablation grid
+    # (undirected + directed x tree + boosting).
     dataset = "HI-Small"
     score_type = "weighted_average"
 
     for directed in [False, True]:
-        # The block columns come straight from the measures CSV, so this
-        # preparation needs neither the graph nor Louvain.
+        # Block columns come straight from the measures CSV, so this needs
+        # neither the graph nor Louvain.
         laundering_combined = data_preparation(
             dataset, all_feature_columns([CONFIG], directed), directed, score_type
         )

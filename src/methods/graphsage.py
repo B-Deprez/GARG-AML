@@ -58,9 +58,8 @@ from src.data.bank_views import (BANK_COLUMNS, filter_transactions,
 
 SEED = 1997
 
-# Account and bank identifiers are read as strings, matching define_ML_labels:
-# "00123" and 123 are different accounts to one and the same account to the
-# other, and the label table is joined on these values.
+# Read as strings to match define_ML_labels, which joins the label table on
+# these values -- "00123" and 123 are different accounts otherwise.
 ID_DTYPES = {"From Bank": str, "To Bank": str, "Account": str, "Account.1": str}
 
 TIMESTAMP_FORMAT = "%Y/%m/%d %H:%M"
@@ -81,9 +80,8 @@ FEATURE_CONFIGS = {
     "attributes": TOPOLOGY_FEATURES + ATTRIBUTE_FEATURES,
 }
 
-# Counts and non-negative money amounts: log1p before standardising, or a
-# handful of hub accounts dominate every feature and the z-scores of everyone
-# else collapse into a spike at zero.
+# Counts and money amounts: log1p before standardising, or a handful of hub
+# accounts dominate and everyone else's z-scores collapse to a spike at zero.
 LOG_SCALED_FEATURES = {
     "degree", "n_sent", "n_received",
     "amount_out_sum", "amount_out_mean", "amount_out_std", "amount_out_max",
@@ -118,8 +116,8 @@ def _structure_from_pandas(path, banks=None):
     frame = pd.read_csv(path, usecols=usecols, dtype=ID_DTYPES)
     frame = filter_transactions(frame, banks)
 
-    # One shared categorical over both endpoint columns, so a node has the
-    # same index whether it appears as sender or receiver.
+    # Shared categorical over both endpoint columns, so a node gets the same
+    # index whether it appears as sender or receiver.
     accounts = pd.Index(pd.unique(pd.concat([frame["Account"], frame["Account.1"]],
                                             ignore_index=True)))
     source = accounts.get_indexer(frame["Account"]).astype(np.int64)
@@ -128,8 +126,8 @@ def _structure_from_pandas(path, banks=None):
     keep = source != target  # construct_IBM_graph drops self-loops; match it
     source, target = source[keep], target[keep]
 
-    # Collapse parallel transactions, then symmetrise: the same graph nx.Graph
-    # gives, without the intermediate object.
+    # Collapse parallel transactions, then symmetrise -- the graph nx.Graph
+    # would give, without building the intermediate object.
     pairs = np.unique(np.stack([np.minimum(source, target),
                                 np.maximum(source, target)], axis=1), axis=0)
     edge_index = np.concatenate([pairs, pairs[:, ::-1]], axis=0).T
@@ -140,8 +138,8 @@ def _structure_from_pandas(path, banks=None):
 def _structure_from_networkx(path, banks=None):
     """Same structure via ``construct_IBM_graph``, for cross-checking."""
     G = construct_IBM_graph(path=path, directed=False, banks=banks)
-    # Captured before from_networkx: it indexes nodes in this iteration order
-    # internally, and that order is what aligns labels and folds.
+    # Captured before from_networkx, whose internal node order this must match
+    # to keep labels and folds aligned.
     node_order = list(G.nodes())
     data = from_networkx(G)
     return data.edge_index.numpy(), node_order
@@ -176,8 +174,8 @@ def build_graph_structure(dataset, results_dir="results", backend="pandas", cach
     else:
         raise ValueError("Unknown backend "+repr(backend))
 
-    # Each undirected edge appears twice in edge_index, so a row count over
-    # the source column is exactly the undirected degree.
+    # Each undirected edge appears twice in edge_index, so counting rows in
+    # the source column gives the undirected degree.
     degree = np.bincount(edge_index[0], minlength=len(node_order)).astype(np.float32)
 
     if cache:
@@ -248,8 +246,8 @@ class _AccountAggregator:
             side["amount_sq"] = side["amount"] ** 2
             self._accumulate_sums(role, side)
 
-        # An account's own bank is near-constant; what varies, and what a model
-        # can use, is the set of banks it deals *with*.
+        # An account's own bank is near-constant; what varies -- and is useful
+        # to a model -- is the set of banks it deals *with*.
         self._accumulate_pairs("bank", pd.concat([
             pd.DataFrame({"account": chunk["Account"], "value": chunk["To Bank"]}),
             pd.DataFrame({"account": chunk["Account.1"], "value": chunk["From Bank"]}),
@@ -274,7 +272,7 @@ class _AccountAggregator:
             sums = self.sums[role].reindex(index).fillna(0.0)
             n = sums["n"]
             mean = np.where(n > 0, sums["total"] / n.replace(0, np.nan), 0.0)
-            # Population variance from the running sums; clipped because
+            # Population variance from the running sums, clipped since
             # catastrophic cancellation can push it a hair below zero.
             variance = np.where(n > 0, sums["total_sq"] / n.replace(0, np.nan) - mean ** 2, 0.0)
             out["n_"+("sent" if role == "out" else "received")] = n.values
@@ -291,9 +289,8 @@ class _AccountAggregator:
         span_days = (times["max"] - times["min"]).dt.total_seconds() / 86400.0
         out["active_span_days"] = np.nan_to_num(span_days.values)
 
-        # Mean gap between an account's transactions. Zero for accounts with a
-        # single transaction, which is the honest value for "no gap observed"
-        # and keeps the column free of NaNs the model cannot consume.
+        # Mean gap between an account's transactions; zero for a single-transaction
+        # account ("no gap observed"), which also keeps the column NaN-free.
         n_total = out["n_sent"].values + out["n_received"].values
         with np.errstate(divide="ignore", invalid="ignore"):
             gap = np.where(n_total > 1, out["active_span_days"].values * 24.0 / (n_total - 1), 0.0)

@@ -74,9 +74,8 @@ from src.utils.runtime import (env_override, select_datasets, echo_config, as_li
 LOUVAIN = False
 
 # Cap for a dataset too large to diagnose exhaustively. None = every node.
-# A capped run still writes the per-node and summary files; it writes no
-# metrics file, because ranking metrics over a sample are not the ranking
-# metrics of the dataset.
+# A capped run still writes the per-node and summary files, but no metrics
+# file: ranking metrics over a sample are not the dataset's ranking metrics.
 SAMPLE_NODES = 20000
 
 # How many nodes to check against the main pipeline before trusting a run's
@@ -87,8 +86,8 @@ PARITY_SAMPLE = 25
 SYNTHETIC_LABELS = ["laundering", "separate", "new_mules", "existing_mules"]
 
 # Model keys for the tidy metrics frame. The two pipeline scores keep their
-# canonical naming.py keys; the variants are diagnosis-only, which is also
-# why this script writes with write_matrices=False (see write_metrics).
+# canonical naming.py keys; the variants are diagnosis-only (hence
+# write_matrices=False below).
 VARIANT_KEYS = {
     "directed":      "gargaml_d",
     "undirected":    "gargaml_u",
@@ -312,11 +311,9 @@ def main():
         if os.path.exists(path):
             metrics.append(path)
 
-    # A sharded/array submission (one dataset per task, via GARGAML_DATASET /
-    # GARGAML_DATASET_INDEX / SLURM_ARRAY_TASK_ID) only ever sees its own
-    # dataset in DATASETS, so the pooled write below would silently clobber
-    # the fixed-name pooled files with just that one dataset's rows,
-    # discarding every other task's. Skip the pooled write in that case; the
+    # A sharded/array submission only ever sees its own dataset in DATASETS,
+    # so the pooled write below would clobber the fixed-name pooled files
+    # with just that one dataset's rows. Skip it in that case; the
     # per-dataset files above are written normally either way.
     sharded = any(os.environ.get(k) for k in
                   ("GARGAML_DATASET", "GARGAML_DATASET_INDEX", "SLURM_ARRAY_TASK_ID"))

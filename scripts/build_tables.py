@@ -3,9 +3,8 @@ Build the result tables from the tidy metrics.
 
 Reads every ``results/<dataset>_<direction><suffix>_metrics.csv`` and writes
 ``results/table_<name>.tex`` plus a ``.csv`` twin of each. Nothing is
-recomputed here -- this is the reporting step for numbers the model scripts
-already produced, which is why it takes seconds and can be re-run after every
-job finishes.
+recomputed here -- this is the reporting step, so it takes seconds and can be
+re-run after every job finishes.
 
     python scripts/build_tables.py
 
@@ -41,9 +40,9 @@ What it writes
     ``scripts/pattern_splitting.py``). It reads beside ``table_severance``:
     edges severed is the cost, attempts destroyed is what it buys.
 
-Before the tables, it prints a coverage report of what is on disk, whose
-``folds`` column says whether a row comes from a cross-validated run or from
-a single split.
+Before the tables, it prints a coverage report of what is on disk; the
+``folds`` column says whether a row is from a cross-validated run or a
+single split.
 
 Gaps
 ----
@@ -71,20 +70,17 @@ from src.utils.reporting import (HEADLINE_CUTOFFS, HEADLINE_TARGETS,
                                  write_table)
 from src.utils.runtime import resolve_results_dir
 
-# The datasets to build tables for. A missing one is skipped with a message.
+# A missing dataset is skipped with a message.
 DATASETS = ["HI-Small", "LI-Large"]
 
-# Both threshold-free metrics are reported: AUC-PR is the primary one under
-# 0.1 % prevalence, and AUC-ROC is included because the feature-group
-# ablation is largely invisible on it, so quoting ROC alone would misread it.
+# AUC-PR is primary under 0.1% prevalence; AUC-ROC is kept because the
+# feature-group ablation is largely invisible on it alone.
 METRICS = ["AUC_PR", "AUC_ROC"]
 
-# The alert-queue tables are per (cut-off, pattern) cell; one table per cell
-# in the whole grid would be 54 tables, so this is the headline slice. Each
-# pattern appears at both 0.0 ("at least one laundering transaction") and
-# 0.1, so the pair read side by side shows how sensitive the ranking is to
-# where the propensity threshold sits, at the queue sizes an investigator
-# actually works. Each cell is written as its own file.
+# Headline slice, not the full (cut-off, pattern) grid -- that would be 54
+# tables. Each pattern appears at both 0.0 and 0.1 so the pair shows how
+# sensitive the ranking is to the propensity threshold, at queue sizes an
+# investigator actually works. Each cell is written as its own file.
 ALERT_CELLS = [(0.0, "Is Laundering"),
                (0.0, "SCATTER-GATHER"),
                (0.0, "GATHER-SCATTER"),
@@ -94,7 +90,7 @@ ALERT_CELLS = [(0.0, "Is Laundering"),
 ALERT_METRICS = ["P@K", "R@K", "lift@K", "TP@K"]
 
 # Expected fold count, used only to mark a mean that rests on fewer. Keep in
-# step with gargaml_tree.py's N_FOLDS; a wrong value here mislabels cells but
+# step with gargaml_tree.py's N_FOLDS -- a wrong value mislabels cells but
 # changes no number.
 N_FOLDS = 5
 
@@ -161,11 +157,10 @@ def build_alert_tables(df, dataset, written):
                                 n_folds=N_FOLDS)
             if table.empty:
                 continue
-            # The population is per row, not per table: a model with a
-            # pooled out-of-fold pass is ranked over every account, one on a
-            # single split over its test slice only. The table prints it per
-            # row, so the caption points there rather than asserting one
-            # population for all of them.
+            # Population is per row, not per table: a cross-validated model
+            # is ranked over every account (pooled out-of-fold), a
+            # single-split one only over its test slice. The caption points
+            # to the column rather than asserting one population for all.
             populations = table["ranked over"].nunique()
             population = ("the population given in the first column; rows "
                           "differ because models evaluated under "

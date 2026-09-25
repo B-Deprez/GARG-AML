@@ -37,7 +37,7 @@ def create_AML_labels(path= "data/HI-Small_Patterns.txt"):
         attemptActive = False
         column = ""
 
-        list_defaults = [0] * 8  # one flag per pattern type
+        list_defaults = [0] * 8
 
         column_to_list_index = {
             "FAN-OUT": 0,
@@ -99,11 +99,10 @@ def create_AML_labels(path= "data/HI-Small_Patterns.txt"):
 
     return df_patterns
 
-# Column positions in a transactions line of *_Patterns.txt. The lines are
-# verbatim rows of the matching *_Trans.csv, so these are that file's columns:
-# Timestamp, From Bank, Account, To Bank, Account.1, Amount Received,
-# Receiving Currency, Amount Paid, Payment Currency, Payment Format,
-# Is Laundering.
+# Column positions in a *_Patterns.txt transaction line -- verbatim rows of
+# the matching *_Trans.csv (Timestamp, From Bank, Account, To Bank,
+# Account.1, Amount Received, Receiving Currency, Amount Paid, Payment
+# Currency, Payment Format, Is Laundering).
 PATTERN_FROM_ACCOUNT = 2
 PATTERN_TO_ACCOUNT = 4
 
@@ -140,7 +139,7 @@ def pattern_instances(path="data/HI-Small_Patterns.txt"):
             elif pattern_type:
                 fields = line.strip().split(",")
                 if len(fields) <= PATTERN_TO_ACCOUNT:
-                    continue  # blank or malformed line inside an attempt
+                    continue  # blank/malformed line inside an attempt
                 rows.append({
                     "instance": instance,
                     "pattern_type": pattern_type,
@@ -167,16 +166,16 @@ def define_ML_labels(path_trans="data/HI-Small_Trans.csv", path_patterns="data/H
             "Account.1": str
         }
 
-    banks = resolve_banks(banks, path_trans) #expands a group spec such as "top50"
+    banks = resolve_banks(banks, path_trans)  # expands a group spec such as "top50"
 
     transactions_df = pd.read_csv(path_trans, dtype=dtype_dict)
     # Filter before the identifier/pattern join: the identifier is built from
     # the row's own columns, so dropping rows first is equivalent and keeps
-    # the join off the transactions a view never sees.
+    # the join off transactions a view never sees.
     transactions_df = filter_transactions(transactions_df, banks)
 
     columns_money = ['Amount Received', 'Amount Paid']
-    for col in columns_money: # make sure monetary amounts have two decimals
+    for col in columns_money:  # enforce two decimals on monetary amounts
         transactions_df[col] = transactions_df[col].apply(lambda x: format_number(x))
 
     transactions_df['Is Laundering'] = transactions_df['Is Laundering'].astype(int)
@@ -215,19 +214,18 @@ def summarise_ML_labels(transactions_df_extended, pattern_columns):
     return laundering_combined, laundering_from, laundering_to
 
 def combine_patterns_GARGAML(results_df, laundering_df, columns = ["GARGAML"]):
-    # Returns one list of per-account values per requested column; accounts
-    # without a GARG-AML row get -2, outside the score's [-1, 1] range.
+    # Accounts without a GARG-AML row get -2, outside the score's [-1, 1]
+    # range.
     missing = [column for column in columns if column not in results_df.columns]
-    if missing: # would otherwise come out as an all -2 feature, silently
+    if missing:  # would otherwise silently come out as an all -2 feature
         raise KeyError("columns absent from the GARG-AML results: "+str(missing))
 
     scores_dict = {column: [] for column in columns}
 
     for account in laundering_df.index:
-        try: # one lookup per account, not one per column: the lookup is what
-             # the function spends its time on
+        try:  # one lookup per account, not per column -- that's the cost
             line = results_df.loc[account]
-        except: # no GARG-AML row for this account
+        except:  # no GARG-AML row for this account
             for column in columns:
                 scores_dict[column].append(-2)
             continue

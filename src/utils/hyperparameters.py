@@ -14,15 +14,14 @@ Three design points:
    configuration is whatever scikit-learn's defaults are: the paper's
    "100 trees, max_depth 3, learning_rate 0.1" is
    ``GradientBoostingClassifier``'s default triple, not a chosen setting.
-   A hardcoded copy would go stale on the next scikit-learn upgrade and
-   the appendix would then describe a run that never happened, so
+   A hardcoded copy would go stale on the next scikit-learn upgrade, so
    :func:`hyperparameter_schema` instantiates each estimator and reads
-   ``get_params()``. The same holds for the Louvain resolution and the
-   split sizes, read from the signatures of
+   ``get_params()`` instead. The same holds for the Louvain resolution and
+   the split sizes, read from the signatures of
    :func:`~src.utils.graph_processing.graph_community` and
-   :func:`~src.utils.evaluation.holdout_split`. The ``source`` column
-   marks which values this repository sets (``explicit``) and which come
-   from the library (``library_default``).
+   :func:`~src.utils.evaluation.holdout_split`. The ``source`` column marks
+   which values this repository sets (``explicit``) vs. the library
+   (``library_default``).
 
 2. **Seeds are not hyperparameters.** ``random_state=1997`` appears in
    every constructor but controls reproducibility, not model capacity, so
@@ -66,14 +65,12 @@ SEARCH_SPACE = "not searched"
 SELECTION_CRITERION = "none -- no model selection was performed"
 TUNED_ON_TEST = "no"
 
-# Parameters that exist in a constructor but do not describe the model:
-# reproducibility seeds and bookkeeping. Reported, but flagged so an
-# appendix table can drop them.
+# Parameters that exist in a constructor but do not describe the model.
+# Reported, but flagged so an appendix table can drop them.
 SEED_PARAMS = {"random_state", "seed"}
 BOOKKEEPING_PARAMS = {"verbose", "verbose_interval", "n_jobs", "warm_start"}
 
-# What each script passes explicitly. Everything else in the estimator is
-# a library default, read at runtime rather than copied out here.
+# What each script passes explicitly; everything else is a library default.
 TREE_PARAMS = {"min_samples_leaf": 10, "random_state": SEED}
 BOOST_PARAMS = {"min_samples_leaf": 10, "random_state": SEED}
 IF_PARAMS = {"random_state": SEED}
@@ -86,12 +83,10 @@ _SKLEARN_MODELS = [
     ("gargaml_if_d", ensemble.IsolationForest, IF_PARAMS),
 ]
 
-# GraphSAGE. Declared rather than read from the estimator, because
-# importing src.methods.graphsage pulls in torch and torch-geometric and
-# this module stays importable without them.
-# :func:`check_graphsage_declaration` verifies the declaration against
-# ``train_fold``'s actual signature whenever torch *is* available, so the
-# two cannot drift apart silently.
+# GraphSAGE. Declared rather than read from the estimator, since importing
+# src.methods.graphsage pulls in torch/torch-geometric and this module stays
+# importable without them. :func:`check_graphsage_declaration` verifies this
+# against ``train_fold``'s actual signature whenever torch is available.
 GRAPHSAGE_PARAMS = {
     "hidden_channels": 64,
     "dropout": 0.2,

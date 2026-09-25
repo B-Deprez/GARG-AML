@@ -37,24 +37,24 @@ def calculate_score_directed(line, score_type="basic"):
         if size_01 + size_12 > 0:
             measure_high = (size_01*measure_01 + size_12*measure_12)/(size_01 + size_12)
         else:
-            measure_high = np.mean([measure_01, measure_12]) #both sizes are 0, revert to basic measure
+            measure_high = np.mean([measure_01, measure_12])  # both sizes 0: revert to basic measure
 
         if size_10 + size_21 + size_00 + size_02 + size_11 + size_20 + size_22 > 0:
             measure_low = (size_10*measure_10 + size_21*measure_21 + size_00*measure_00 + size_02*measure_02 + size_11*measure_11 + size_20*measure_20 + size_22*measure_22)/(size_10 + size_21 + size_00 + size_02 + size_11 + size_20 + size_22)
         else:
-            measure_low = np.mean([measure_10, measure_21, measure_00, measure_02, measure_11, measure_20, measure_22]) #all sizes are 0, revert to basic measure
+            measure_low = np.mean([measure_10, measure_21, measure_00, measure_02, measure_11, measure_20, measure_22])  # all sizes 0: revert to basic measure
 
         measure = measure_high - measure_low
 
         if size_10 + size_21 > 0:
             measure_high_transpose = (size_10*measure_10 + size_21*measure_21)/(size_10 + size_21)
         else:
-            measure_high_transpose = np.mean([measure_10, measure_21]) #both sizes are 0, revert to basic measure
+            measure_high_transpose = np.mean([measure_10, measure_21])  # both sizes 0: revert to basic measure
         
         if size_01 + size_12 + size_00 + size_20 + size_11 + size_02 + size_22 > 0:
             measure_low_transpose = (size_01*measure_01 + size_12*measure_12 + size_00*measure_00 + size_20*measure_20 + size_11*measure_11 + size_02*measure_02 + size_22*measure_22)/(size_01 + size_12 + size_00 + size_20 + size_11 + size_02 + size_22)
         else:
-            measure_low_transpose = np.mean([measure_01, measure_12, measure_00, measure_20, measure_11, measure_02, measure_22]) #all sizes are 0, revert to basic measure
+            measure_low_transpose = np.mean([measure_01, measure_12, measure_00, measure_20, measure_11, measure_02, measure_22])  # all sizes 0: revert to basic measure
         
         measure_transpose = measure_high_transpose - measure_low_transpose
 
@@ -101,9 +101,9 @@ def calculate_score_undirected(line, score_type="basic"):
         if total_size > 0:
             measure = measure_2 - (size_1 * measure_1 + size_3 * measure_3) / total_size
         elif size_2 > 0:
-            measure = measure_2 #both sizes are 0, so only measure_2 is relevant
+            measure = measure_2  # size_1/size_3 both 0, so only measure_2 is relevant
         else:
-            measure = -1 #Far away from smurfing
+            measure = -1  # no neighbours at all: far away from smurfing
     return measure
 
 def define_gargaml_scores_undirected(results_df_measures, score_type="basic"):

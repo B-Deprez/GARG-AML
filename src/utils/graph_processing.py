@@ -9,16 +9,13 @@ import numpy as np
 # Pre-processing sensitivity
 # ---------------------------------------------------------------------------
 # The resolution sweep encodes **the setting in the dataset name** rather than
-# adding a parameter to every script. "HI-Small_res20" is HI-Small
-# pre-processed at resolution 20, "HI-Small_nolouvain" is HI-Small with the
-# reduction switched off, and a bare "HI-Small" takes the default. Since every
-# output path in this repository is built from the dataset string, each
-# setting writes its own measures, metrics and tables with no further
-# plumbing.
-#
+# adding a parameter to every script: "HI-Small_res20" is resolution 20,
+# "HI-Small_nolouvain" has the reduction switched off, a bare "HI-Small" takes
+# the default. Every output path is built from the dataset string, so each
+# setting writes its own measures/metrics/tables with no further plumbing.
 # The token may sit anywhere in the name, so it composes with a bank view in
-# either order: "HI-Small_res20_bank012" and "HI-Small_bank012_res20" both
-# parse, because parse_view partitions on the first "_bank".
+# either order ("HI-Small_res20_bank012" or "HI-Small_bank012_res20"), since
+# parse_view partitions on the first "_bank".
 #
 # "HI-Small_hubs100" is the other pre-processing arm: no Louvain, the 100
 # highest-degree accounts removed instead. It carries no resolution of its
@@ -109,9 +106,8 @@ def reduce_graph(G, resolution=DEFAULT_RESOLUTION, dataset=None,
 
     ``resolution=None`` returns ``G`` unchanged: the no-Louvain arm of the
     sweep, which bounds what the pre-processing costs in detection
-    performance. It is a genuine identity rather than a resolution so low
-    that everything lands in one community -- Louvain is never run, so no
-    edge is dropped and no seed matters.
+    performance. A genuine identity, not a resolution so low that everything
+    lands in one community -- Louvain is never run, so no edge is dropped.
 
     **The no-Louvain arm is expensive, and not linearly so.** The reduction
     is what keeps a second-order ego graph small; without it a HI-Small ego
@@ -166,8 +162,8 @@ def _log_severance(dataset, setting, G, H, results_dir="results"):
 
 
 def graph_degree(G, degree_cutoff=0.01, n_hubs=None):
-    # Hub removal; degree_cutoff is relative, the top fraction by degree, and
-    # n_hubs removes exactly that many highest-degree nodes instead.
+    # Hub removal: degree_cutoff is a relative top fraction; n_hubs, when
+    # given, removes exactly that many highest-degree nodes instead.
     G_copy = G.copy()
 
     # Ranked on the undirected view, as community_map's partition is, so the
@@ -181,8 +177,7 @@ def graph_degree(G, degree_cutoff=0.01, n_hubs=None):
     ).transpose()
 
     if n_hubs is not None:
-        # nlargest keeps exactly n_hubs; a tie at the boundary is broken by
-        # node order, which is the CSV's and therefore reproducible.
+        # A boundary tie is broken by node order (the CSV's), so reproducible.
         hubs_deleted = list(degree_df["Degree"].nlargest(n_hubs).index)
     else:
         degree_threshold = degree_df["Degree"].quantile(1 - degree_cutoff)

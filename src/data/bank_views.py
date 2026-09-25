@@ -16,10 +16,10 @@ the bank filter; ``banks=None`` is the full data.
 Which transactions are in a view
 --------------------------------
 Filtering on the **bank fields** (``From Bank == b or To Bank == b``) and
-filtering on **client membership** (``Account`` or ``Account.1`` belongs to
-a client of *b*) select the same rows; they can diverge only on an account
-that appears under two banks. The bank-field filter is used because it is a
-vectorised mask over two columns and needs no client set built first.
+filtering on **client membership** (``Account``/``Account.1`` belongs to a
+client of *b*) select the same rows; they diverge only on an account held at
+two banks. The bank-field filter is used since it's a vectorised mask over
+two columns, needing no client set built first.
 
 Who gets evaluated
 ------------------
@@ -28,8 +28,8 @@ The bank's **own clients**, not every account in the view -- see
 side, hence carries *c*'s bank in its bank field, hence is in the view. So a
 client's laundering propensity computed on the view equals its full-data
 value: the labels are identical and a view-vs-full comparison varies only
-the features. External counterparties stay in the graph -- they are what
-remains of the second-order neighbourhood -- but are not scored.
+the features. External counterparties stay in the graph -- what remains of
+the second-order neighbourhood -- but are not scored.
 """
 
 from __future__ import annotations
@@ -40,29 +40,27 @@ import pandas as pd
 
 from src.utils.graph_processing import strip_resolution
 
-# The two columns a view is defined on, and the account columns they pair
-# with. ``Account`` is booked at ``From Bank``, ``Account.1`` at ``To Bank``.
+# Columns a view is defined on, paired with the account column each books to:
+# ``Account`` at ``From Bank``, ``Account.1`` at ``To Bank``.
 BANK_COLUMNS = ("From Bank", "To Bank")
 ACCOUNT_COLUMNS = ("Account", "Account.1")
 
-# Separator in a view's dataset name. It is a legal filename character and
-# absent from every dataset name, so parse_view inverts view_name
-# unambiguously.
+# Legal filename character, absent from every dataset name, so parse_view
+# inverts view_name unambiguously.
 VIEW_SEPARATOR = "_bank"
 
-# Bank identifiers are zero-padded strings ("010" != "10"), so every read of
-# a transactions file must force them to str -- pandas would otherwise infer
-# int64 and drop the padding, making every bank lookup miss.
+# Bank identifiers are zero-padded strings ("010" != "10"); force str here or
+# pandas infers int64, drops the padding, and every bank lookup misses.
 BANK_DTYPES = {c: str for c in BANK_COLUMNS + ACCOUNT_COLUMNS}
 
 
 def normalise_banks(banks) -> list[str] | None:
     """Normalise a bank argument to a sorted list of strings, or ``None``.
 
-    Accepts ``None`` (the full graph), a single identifier, or an iterable
-    of them. Identifiers are coerced to ``str`` because they are zero-padded
-    in the CSV and a caller passing ``12`` instead of ``"012"`` would
-    otherwise select nothing at all rather than failing.
+    Accepts ``None`` (full graph), a single identifier, or an iterable of
+    them. Identifiers are coerced to ``str`` since they're zero-padded in the
+    CSV -- passing ``12`` instead of ``"012"`` would otherwise silently
+    select nothing rather than fail.
     """
     if banks is None:
         return None
@@ -75,13 +73,12 @@ def normalise_banks(banks) -> list[str] | None:
 
 
 # A bank *group* spec stands for several banks at once. "top<k>" is the k
-# banks with the most clients, pooled as a single institution: no individual
-# bank in the data holds a realistic share of the accounts.
+# banks with the most clients, pooled as one institution: no individual bank
+# in the data holds a realistic share of the accounts.
 GROUP_PREFIX = "top"
 
 # Expanding a group costs a pass over the transactions file, and the graph,
-# label and measure builders each resolve independently, so the result is
-# cached per (path, spec).
+# label and measure builders each resolve independently, so cache by (path, spec).
 _GROUP_CACHE: dict = {}
 
 
@@ -94,10 +91,10 @@ def is_bank_group(spec) -> bool:
 def resolve_banks(banks, path=None):
     """Expand a bank spec into concrete identifiers.
 
-    ``banks`` is either concrete -- one identifier or a list of them, in
-    which case this is just :func:`normalise_banks` -- or a single group
-    spec (see :data:`GROUP_PREFIX`), which needs ``path`` to expand. Every
-    other function here expects the concrete identifiers this returns.
+    ``banks`` is either concrete -- one identifier or a list, in which case
+    this is just :func:`normalise_banks` -- or a single group spec (see
+    :data:`GROUP_PREFIX`), which needs ``path`` to expand. Every other
+    function here expects the concrete identifiers this returns.
     """
     banks = normalise_banks(banks)
     if banks is None:
@@ -121,10 +118,10 @@ def _require_resolved(banks, caller):
     """Normalise ``banks`` and reject a group spec that was never expanded.
 
     A group spec is a *name* for a set of banks, not a bank, so matching it
-    against a bank column selects nothing, and an empty result is
-    indistinguishable from a view that legitimately has no positives. The
-    caller expands the spec with :func:`resolve_banks`, which needs the
-    transactions file this frame no longer carries.
+    against a bank column selects nothing -- indistinguishable from a view
+    that legitimately has no positives. Callers must expand the spec with
+    :func:`resolve_banks` first, since this function has no transactions
+    file to do it with.
     """
     banks = normalise_banks(banks)
     if banks is None:
@@ -234,11 +231,10 @@ def bank_clients(df: pd.DataFrame, banks) -> set:
 def bank_account_pairs(path: str, chunksize: int | None = None) -> pd.DataFrame:
     """Distinct ``(bank, account)`` pairs in a transactions file.
 
-    ``chunksize`` streams the file instead of loading it, which is what
-    makes this usable on the multi-gigabyte LI-Large CSV: each chunk is
-    reduced to its distinct pairs before the next one is read, so peak
-    memory is one chunk plus the running pair set rather than the file.
-    ``None`` loads the file whole.
+    ``chunksize`` streams the file instead of loading it whole -- what makes
+    this usable on the multi-gigabyte LI-Large CSV: each chunk is reduced to
+    its distinct pairs before the next is read, so peak memory is one chunk
+    plus the running pair set. ``None`` loads the file whole.
     """
     usecols = list(BANK_COLUMNS + ACCOUNT_COLUMNS)
 

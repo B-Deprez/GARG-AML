@@ -9,9 +9,9 @@ from .utils.measure_functions_directed import *
 from .utils.neighbourhood_functions import summaries_neighbourhoors_node, degree_neighbours_node, GARG_AML_nodeselection, combine_GARG_AML
 
 def GARG_AML_node_directed_measures(node, G_copy, G_copy_und, G_copy_rev, include_size = False):
-    G_ego_second_und = nx.ego_graph(G_copy_und, node, 2) #Use both incoming and outgoing edges
+    G_ego_second_und = nx.ego_graph(G_copy_und, node, 2)  # undirected: both directions count as adjacency
     G_ego_second = nx.subgraph(G_copy, G_ego_second_und.nodes)
-    G_ego_second_rev = nx.ego_graph(G_copy_rev, node, 2) #Look at the reverse graph to get the incoming edges
+    G_ego_second_rev = nx.ego_graph(G_copy_rev, node, 2)  # reverse graph gives the incoming edges
 
     nodes_0, nodes_1, nodes_2, nodes_ordered = GARG_AML_nodeselection(G_ego_second, node, directed = True, G_ego_second_und = G_ego_second_und, G_ego_second_rev = G_ego_second_rev)
 
@@ -59,7 +59,7 @@ def GARG_AML_node_directed(node, G_copy, G_copy_und, G_copy_rev):
 def GARG_AML_node_undirected_measures(node, G_copy, include_size = False):
     G_ego_second = nx.ego_graph(G_copy, node, 2)
     
-    # nodes_ordered are the nodes ordered as node, 2nd order and 1st order neighbours
+    # nodes_ordered: node, then 2nd-order, then 1st-order neighbours (Eq. 8 block layout)
     nodes_1, nodes_2, nodes_ordered = GARG_AML_nodeselection(G_ego_second, node, directed = False)
     
     adj_full = nx.adjacency_matrix(G_ego_second, nodelist=nodes_ordered).toarray()

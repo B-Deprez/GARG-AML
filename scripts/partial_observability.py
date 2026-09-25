@@ -114,11 +114,10 @@ MIN_DEGREE = 3
 # than an alert queue.
 ALERT_SIZES = [10, 25, 50, 100, 500, 1000]
 
-# Parallelism: use up to 4 or half of CPUs
 n_cpu = min(4, cpu_count() // 2)
 
-# Slurm overrides; the constants above remain the documented defaults.
-# One institution per array task: 'top50' is far more expensive than '012'.
+# Slurm overrides. One institution per array task: 'top50' is far more
+# expensive than '012'.
 DATASET = env_override("dataset", DATASET)
 INSTITUTIONS = env_override("institutions", INSTITUTIONS, as_list)
 n_cpu = env_override("n_cpu", n_cpu, int)
@@ -131,16 +130,13 @@ DIRECTED_COLUMNS = ["node"] + \
     ["measure_"+str(i)+str(j) for i in range(3) for j in range(3)] + \
     ["size_"+str(i)+str(j) for i in range(3) for j in range(3)]
 
-# Global variables for worker processes, as in the measure scripts
 graph_for_worker = None
 graph_for_worker_und = None
 graph_for_worker_rev = None
 
 
 def init_worker(graph, graph_und, graph_rev):
-    """
-    Initializer for worker processes to set the graph in each subprocess.
-    """
+    """Sets the graph globals in each worker subprocess."""
     global graph_for_worker
     global graph_for_worker_und
     global graph_for_worker_rev

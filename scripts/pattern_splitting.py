@@ -62,7 +62,6 @@ DATASETS = ["HI-Small"]
 # the same measurement as the rest.
 RESOLUTIONS = [None, 1, 5, DEFAULT_RESOLUTION, 20, 50]
 
-# Environment overrides, for array jobs; the constants above are the defaults.
 DATASETS = select_datasets(DATASETS)
 RESULTS_DIR = resolve_results_dir()
 
@@ -83,9 +82,7 @@ def diagnose_dataset(dataset):
     frames = []
     for resolution in RESOLUTIONS:
         if resolution is None:
-            # No partition at all: one community for everything, so nothing
-            # is severed. Built explicitly rather than special-cased inside
-            # the analysis, so the control takes the same code path.
+            # The no-Louvain control: one community for everything.
             communities = dict.fromkeys(nodes, 0)
         else:
             communities = community_map(G, resolution=resolution)

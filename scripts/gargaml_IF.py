@@ -51,7 +51,7 @@ def gargaml_IF(dataset = "HI-Small", directed = True):
             "measure_22"
             ]]
 
-    else: #If the results do not exist, calculate them
+    else:
         G = construct_IBM_graph(path=path, directed = directed)
         G_reduced = graph_community(G)
 
@@ -132,7 +132,7 @@ def data_preparation(dataset, measure_df):
     anomaly_scores = anomaly_scores[["anomaly_score"]]
     anomaly_scores['anomaly_score'] = -anomaly_scores['anomaly_score']
 
-    transactions_df_extended, pattern_columns = define_ML_labels( #patterns
+    transactions_df_extended, pattern_columns = define_ML_labels(
         path_trans = "data/"+dataset+"_Trans.csv",
         path_patterns = "data/"+dataset+"_Patterns.txt"
     )
@@ -169,9 +169,8 @@ def IF_AUC(dataset, measure_df, directed=True):
 
             try:
                 # No y_pred: this baseline has no natural 0/1 prediction, so
-                # precision/f1 come back NaN rather than invented at some threshold
-                # (evaluate_scores' documented behaviour) -- only AUC/ranking metrics
-                # were ever meaningful for it.
+                # precision/f1 come back NaN rather than invented at some
+                # threshold -- only AUC/ranking metrics were ever meaningful.
                 metrics = evaluate_scores(y_true, y_score_full)
                 status = "ok"
             except Exception as exc:

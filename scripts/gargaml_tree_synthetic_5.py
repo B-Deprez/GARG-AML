@@ -22,14 +22,14 @@ from sklearn import ensemble
 
 RESULTS_DIR = resolve_results_dir()
 
-# Result cells are serialised as repr()'d dicts inside CSV cells and parsed back with a
-# bare eval() in notebooks/VisualisationResults.ipynb, which has no `nan` name bound in
-# scope: a single stray NaN anywhere in a cell raises inside that eval() and silently
-# zeroes out the real Precision/F1/AUC numbers alongside it. So this script writes -1
-# for "missing" (as data_preparation's fillna(-1) below does) and 0 for a total training
-# failure. LEGACY_METRIC_RENAME maps the shared module's key spelling onto this file's
-# capitalisation; _legacy_metric_dict substitutes -1 for any NaN (only R@K/lift@K can be
-# NaN, when a cell has zero positives), so every cell stays eval()-safe.
+# Result cells are repr()'d dicts parsed back with a bare eval() in
+# notebooks/VisualisationResults.ipynb, which has no `nan` name in scope -- a
+# stray NaN anywhere raises there and zeroes out the whole cell's metrics. So
+# -1 stands for "missing" (data_preparation's fillna(-1) below) and 0 for a
+# total training failure. LEGACY_METRIC_RENAME maps the shared module's key
+# spelling to this file's capitalisation; _legacy_metric_dict substitutes -1
+# for any NaN (only possible from R@K/lift@K on zero positives) so every cell
+# stays eval()-safe.
 LEGACY_METRIC_RENAME = {"precision": "Precision", "f1": "F1"}
 
 
@@ -135,29 +135,29 @@ def main():
         100, 
         10000, 
         100000
-        ] # Number of nodes in the graph
+        ]
     
     m_edges_list = [
         1, 
         2, 
         5
-        ] # Number of edges to attach from a new node to existing nodes
+        ] # BA: edges attached from a new node to existing nodes
     
     p_edges_list = [
         0.001, 
         0.01
-        ] # Probability of adding an edge between two nodes
+        ] # WS: rewiring probability
     
     generation_method_list = [
         'Barabasi-Albert', 
         'Erdos-Renyi', 
         'Watts-Strogatz'
-        ] # Generation method for the graph
+        ]
     
     n_patterns_list = [
         #3, 
         5
-        ] # Number of smurfing patterns to add
+        ]
 
     results_dict = {}
     for n_nodes in n_nodes_list:
