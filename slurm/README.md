@@ -60,6 +60,14 @@ Copy-pasteable. Stage 1 must precede stage 2 for the **same dataset name**, and
 the tree job must precede GraphSAGE for that name because it writes the fold
 partition GraphSAGE reads.
 
+Two things bite when chaining these by hand. `sbatch --parsable` returns
+`<jobid>;<cluster>` here, and `;` is a shell command separator, so an unquoted
+id splits the sbatch line in two -- `slurm/submit.sh` strips the suffix, a bare
+`sbatch` needs `| cut -d";" -f1`. And a dependency only holds while the job it
+names is still known to the scheduler: once stage 1 has completed and left the
+queue, submitting stage 2 against its id fails with `Job dependency problem`.
+Drop the `--dependency` and gate on the files instead -- see Recovery.
+
 ```bash
 # --- Stage 1: IBM measures (2 jobs x 1 task each, CPU) ----------------------
 # Index 4 = HI-Small, the published setting. See `bash slurm/common.sh`.
@@ -68,19 +76,19 @@ und=$(slurm/submit.sh slurm/measures_ibm_undir.slurm HI-Small --array=4)
 
 # --- Stage 1: synthetic measures (2 jobs x 22 tasks per tier, CPU) ----------
 # Submit the tiers separately -- their costs differ by four orders of magnitude.
-sd1=$(sbatch --parsable --array=0-21  --time=00:30:00 --mem=8g  slurm/measures_synth_dir.slurm)
-sd2=$(sbatch --parsable --array=22-43 --time=02:00:00 --mem=16g slurm/measures_synth_dir.slurm)
-su1=$(sbatch --parsable --array=0-21  --time=00:30:00 --mem=8g  slurm/measures_synth_undir.slurm)
-su2=$(sbatch --parsable --array=22-43 --time=02:00:00 --mem=16g slurm/measures_synth_undir.slurm)
+sd1=$(sbatch --parsable --array=0-21  --time=00:30:00 --mem=8g  slurm/measures_synth_dir.slurm | cut -d";" -f1)
+sd2=$(sbatch --parsable --array=22-43 --time=02:00:00 --mem=16g slurm/measures_synth_dir.slurm | cut -d";" -f1)
+su1=$(sbatch --parsable --array=0-21  --time=00:30:00 --mem=8g  slurm/measures_synth_undir.slurm | cut -d";" -f1)
+su2=$(sbatch --parsable --array=22-43 --time=02:00:00 --mem=16g slurm/measures_synth_undir.slurm | cut -d";" -f1)
 # The 100,000-node tier only once the cheap ones look right (22 tasks, ~10 h each):
-# sd3=$(sbatch --parsable --array=44-65 --time=24:00:00 --mem=64g slurm/measures_synth_dir.slurm)
+# sd3=$(sbatch --parsable --array=44-65 --time=24:00:00 --mem=64g slurm/measures_synth_dir.slurm | cut -d";" -f1)
 
 # --- Stage 2: models (CPU) --------------------------------------------------
 tree=$(slurm/submit.sh slurm/tree.slurm HI-Small --array=4 --dependency=afterok:$dir:$und)
 # tree_blocks.slurm and if.slurm hardcode their dataset in the Python script
 # (main()), so submit them directly with sbatch, not through submit.sh.
-blk=$(sbatch --parsable --dependency=afterok:$dir:$und slurm/tree_blocks.slurm)
-ifj=$(sbatch --parsable --dependency=afterok:$dir:$und slurm/if.slurm)
+blk=$(sbatch --parsable --dependency=afterok:$dir:$und slurm/tree_blocks.slurm | cut -d";" -f1)
+ifj=$(sbatch --parsable --dependency=afterok:$dir:$und slurm/if.slurm | cut -d";" -f1)
 ts=$(slurm/submit.sh   slurm/tree_synth.slurm base --dependency=afterok:$sd1:$su1)
 
 # --- Stage 2: GraphSAGE (1 job, GPU) ---------------------------------------
@@ -91,7 +99,7 @@ gs=$(slurm/submit.sh slurm/graphsage.slurm HI-Small --dependency=afterok:$tree)
 ps=$(slurm/submit.sh  slurm/pattern_splitting.slurm HI-Small)
 po1=$(slurm/submit.sh slurm/partial_obs.slurm 012)
 po2=$(slurm/submit.sh slurm/partial_obs.slurm top50)
-dd=$(sbatch --parsable slurm/directed_diagnosis.slurm)
+dd=$(sbatch --parsable slurm/directed_diagnosis.slurm | cut -d";" -f1)
 
 # --- Reporting (1 core, minutes) -------------------------------------------
 # afterANY, so one failed arm does not block the tables: build_tables.py

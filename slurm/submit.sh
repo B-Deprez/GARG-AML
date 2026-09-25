@@ -31,4 +31,9 @@ name="$(basename "$script" .slurm)_${dataset}"
 
 # Extra sbatch args come BEFORE the script so they override the #SBATCH lines;
 # the dataset goes after it, as the script's positional $1.
-sbatch --parsable --job-name="$name" "$@" "$script" "$dataset"
+jobid="$(sbatch --parsable --job-name="$name" "$@" "$script" "$dataset")" || exit $?
+
+# On a multi-cluster setup (wice is one) --parsable returns "<jobid>;<cluster>",
+# and the ";" is a shell command separator -- so an unquoted $id in
+# --dependency=afterok:$id splits the sbatch line in two. Emit the bare id.
+echo "${jobid%%;*}"
