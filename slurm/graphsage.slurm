@@ -24,7 +24,10 @@
 #          the last fold, so a wall-time kill loses the metrics of every
 #          completed fit while keeping their checkpoints. Size --time to finish
 #          the whole sweep; do not plan on a restart to collect the metrics.
-# GPU      One GPU. A 2-layer GraphSAGE with a small hidden dimension is one
+# GPU      One GPU, and --nodes=1 explicitly: wice's GPU partitions reject a
+#          submission that gives no node count, unlike the batch partition
+#          every other job here uses.
+#          A 2-layer GraphSAGE with a small hidden dimension is one
 #          model on one device; the script has no data-parallel path, so a
 #          second GPU would sit idle. GARGAML_REQUIRE_GPU=1 is set below and is
 #          the point of this job: get_device() otherwise falls back to CPU
@@ -57,6 +60,7 @@
 
 #SBATCH --cluster=wice
 #SBATCH --partition=gpu_a100
+#SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
