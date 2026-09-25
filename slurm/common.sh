@@ -37,6 +37,9 @@ IBM_DATASETS=(
   "LI-Large"              # 7  2,054,390 nodes / 176M edges -- the big one
   "HI-Small_nolouvain"    # 8  control: no reduction at all
   "LI-Large_nolouvain"    # 9  expected infeasible -- see slurm/README.md
+  "HI-Small_hubs5"        # 10 hub removal instead of Louvain: top 5 accounts
+  "HI-Small_hubs10"       # 11 ... top 10
+  "HI-Small_hubs100"      # 12 ... top 100
 )
 
 # --- Synthetic array ranges -------------------------------------------------

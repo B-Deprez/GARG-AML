@@ -15,7 +15,7 @@ from src.methods.gargaml_scores import define_gargaml_scores, summarise_gargaml_
 from src.data.graph_construction import construct_IBM_graph
 from src.data.bank_views import (bank_clients, parse_view, patterns_path,
                                  resolve_banks, trans_path)
-from src.utils.graph_processing import parse_resolution, reduce_graph
+from src.utils.graph_processing import parse_hubs, parse_resolution, reduce_graph
 from src.utils.evaluation import (
     CUT_OFFS,
     HEADLINE_CUTOFFS,
@@ -50,17 +50,19 @@ from sklearn import ensemble
 from pickle import dump
 
 # Datasets to run, smallest first: a plain name is the full graph, "_bank<b>"
-# / "_banktop<k>" a single-institution view, "_res<r>" a Louvain resolution and
-# "_nolouvain" no reduction at all (see src/utils/graph_processing). Each entry
-# overwrites its own result files in place, and one whose stage-1 measures are
-# missing is skipped rather than failing, so entries can be commented out
-# freely. LI-Large and the no-Louvain arms are the expensive runs.
+# / "_banktop<k>" a single-institution view, "_res<r>" a Louvain resolution,
+# "_nolouvain" no reduction at all and "_hubs<k>" hub removal instead of
+# Louvain (see src/utils/graph_processing). Each entry overwrites its own
+# result files in place, and one whose stage-1 measures are missing is skipped
+# rather than failing, so entries can be commented out freely. LI-Large and
+# the no-Louvain arms are the expensive runs.
 DATASETS = ["HI-Small_bank012", "HI-Small_banktop50",
             "HI-Small_res1", "HI-Small_res5",
             "HI-Small",                        # default resolution, 10
             "HI-Small_res20", "HI-Small_res50",
             "LI-Large",
-            "HI-Small_nolouvain", "LI-Large_nolouvain"]
+            "HI-Small_nolouvain", "LI-Large_nolouvain",
+            "HI-Small_hubs5", "HI-Small_hubs10", "HI-Small_hubs100"]
 
 # The pattern targets swept for every dataset and feature config. The matching
 # label cut-offs come from src/utils/evaluation.py rather than being declared
@@ -166,11 +168,12 @@ def reduced_graph(dataset):
     """
     base, banks = parse_view(dataset)  # None for the full graph
     G = construct_IBM_graph(path = trans_path(dataset), directed = False, banks = banks)
-    # Same Louvain setting stage 1 used, read back out of the dataset name, so
+    # Same pre-processing stage 1 used, read back out of the dataset name, so
     # the neighbourhood features match the measures they are joined to. dataset
     # is not passed on: stage 1 already logged the severance and this would
     # duplicate the row.
-    return reduce_graph(G, parse_resolution(dataset)[1], results_dir=RESULTS_DIR)
+    return reduce_graph(G, parse_resolution(dataset)[1], results_dir=RESULTS_DIR,
+                        hubs=parse_hubs(dataset))
 
 def data_preparation(dataset, feature_cols, directed, score_type, G_reduced = None):
     """Build one feature table holding every column in ``feature_cols``.
@@ -230,6 +233,20 @@ def data_preparation(dataset, feature_cols, directed, score_type, G_reduced = No
         clients = bank_clients(transactions_df_extended, banks)
         laundering_combined = laundering_combined[laundering_combined.index.isin(clients)]
         print("  bank view: "+str(len(laundering_combined))+" client accounts evaluated")
+
+    hubs = parse_hubs(dataset)
+    if hubs is not None:
+        # Hub removal is the one arm that deletes accounts from the graph, so
+        # the hubs have no score. They are dropped rather than left at the -2
+        # sentinel combine_patterns_GARGAML gives an unscored account, which
+        # would rank them below every scored one on a score they never got.
+        scored = laundering_combined.index.isin(results_df.index)
+        dropped = laundering_combined[~scored]
+        laundering_combined = laundering_combined[scored]
+        print("  hub removal (top "+str(hubs)+"): "+str(len(dropped))
+              +" unscored accounts dropped, "
+              +str(int((dropped["Is Laundering"] > 0).sum()))
+              +" of them with a laundering transaction")
 
     combined_patterns_GARGAML = combine_patterns_GARGAML(results_df, laundering_combined, columns = feature_cols)
 

@@ -52,7 +52,8 @@ import pandas as pd
 
 from src.utils.evaluation import ALERT_SIZES, HEADLINE_CUTOFFS, LEGACY_METRICS
 from src.utils.features import is_direction_free
-from src.utils.graph_processing import DEFAULT_RESOLUTION, parse_resolution
+from src.utils.graph_processing import (DEFAULT_RESOLUTION, HUBS_SEPARATOR,
+                                        parse_hubs, parse_resolution, setting_label)
 from src.utils.naming import MODEL_ORDER, pretty_config
 
 # Where a tidy file's name comes apart: <dataset>_<direction><suffix>_metrics.csv.
@@ -508,35 +509,55 @@ def cost_table(df, dataset, metrics=None, n_folds=None, latex=True):
 
 
 def louvain_setting(df):
-    """Split ``dataset`` into its base name and its Louvain setting.
+    """Split ``dataset`` into its base name and its pre-processing setting.
 
     The sweep encodes the setting in the dataset string (``HI-Small_res20``,
-    ``HI-Small_nolouvain``), so every arm arrives here as a separate
-    "dataset". The ``base_dataset`` and ``resolution`` columns are what let a
-    table put the setting on an axis instead of scattering it across several.
+    ``HI-Small_nolouvain``, ``HI-Small_hubs100``), so every arm arrives here
+    as a separate "dataset". The ``base_dataset`` and ``resolution`` columns
+    are what let a table put the setting on an axis instead of scattering it
+    across several.
 
     ``resolution`` is the string ``"off"`` for the no-Louvain arm rather than
     NaN: it is a real setting that produced real numbers, and a NaN would be
-    dropped by the pivot and vanish from the comparison.
+    dropped by the pivot and vanish from the comparison. A hub-removal arm is
+    ``"hubs<k>"`` for the same reason.
     """
     if df.empty:
         return df.assign(base_dataset=[], resolution=[])
 
     parsed = [parse_resolution(name) for name in df["dataset"]]
+    hubs = [parse_hubs(name) for name in df["dataset"]]
     return df.assign(
         base_dataset=[base for base, _ in parsed],
-        resolution=["off" if res is None else res for _, res in parsed])
+        resolution=[setting_label(res, k) for (_, res), k in zip(parsed, hubs)])
+
+
+def _is_hubs(value):
+    return isinstance(value, str) and value.startswith(HUBS_SEPARATOR)
 
 
 def _resolution_order(values):
     """Sweep columns in order of how much they reduce the graph.
 
-    ``off`` first (nothing removed), then ascending resolution, since higher
-    resolution means smaller communities and more inter-community edges
-    discarded. Sorting these as strings would put ``"10"`` before ``"5"``.
+    ``off`` first (nothing removed), then the hub-removal arms by ascending
+    ``k``, then ascending resolution, since higher resolution means smaller
+    communities and more inter-community edges discarded. Sorting these as
+    strings would put ``"10"`` before ``"5"``.
     """
-    numeric = sorted(v for v in values if v != "off")
-    return (["off"] if "off" in set(values) else []) + numeric
+    values = list(values)
+    hubs = sorted((v for v in values if _is_hubs(v)),
+                  key=lambda v: int(v[len(HUBS_SEPARATOR):]))
+    numeric = sorted(v for v in values if v != "off" and not _is_hubs(v))
+    return (["off"] if "off" in values else []) + hubs + numeric
+
+
+def _setting_column(value):
+    """Column header for one arm of the pre-processing sweep."""
+    if value == "off":
+        return "no Louvain"
+    if _is_hubs(value):
+        return "top-" + value[len(HUBS_SEPARATOR):] + " hubs"
+    return f"r={value:g}" + (" (published)" if value == DEFAULT_RESOLUTION else "")
 
 
 def sweep_table(df, dataset, direction, metric="AUC_PR", features="full",
@@ -576,10 +597,128 @@ def sweep_table(df, dataset, direction, metric="AUC_PR", features="full",
                    columns="resolution", n_folds=n_folds, bold_max=False,
                    latex=latex)
     table = table.reindex(columns=_resolution_order(table.columns))
-    table.columns = [("no Louvain" if c == "off" else
-                      f"r={c:g}" + (" (published)" if c == DEFAULT_RESOLUTION else ""))
-                     for c in table.columns]
+    table.columns = [_setting_column(c) for c in table.columns]
     return table
+
+
+# Row blocks of the per-pattern severance table. The two shapes GARG-AML
+# targets lead under their own heading, since the whole point of the table is
+# whether the pre-processing spares them.
+SEVERANCE_BLOCKS = [
+    ("GARG-AML targets", ["GATHER-SCATTER", "SCATTER-GATHER"]),
+    ("Other injected patterns",
+     ["FAN-OUT", "FAN-IN", "CYCLE", "BIPARTITE", "STACK", "RANDOM"]),
+    (None, ["Not Classified"]),
+]
+
+
+def _severance_settings(values):
+    """The sweep's settings, hub arms first then ascending resolution.
+
+    The severance log names them ``hubs<k>`` and ``r=<r>``; both are sorted
+    numerically, so ``hubs100`` does not land between ``hubs10`` and
+    ``hubs5``.
+    """
+    hubs, resolutions = [], []
+    for value in values:
+        if str(value).startswith(HUBS_SEPARATOR):
+            hubs.append(value)
+        else:
+            resolutions.append(value)
+    hubs.sort(key=lambda v: int(str(v)[len(HUBS_SEPARATOR):]))
+    resolutions.sort(key=lambda v: float(str(v).split("=")[1]))
+    return hubs, resolutions
+
+
+def severance_pattern_latex(severance, dataset=None, caption=None,
+                            label="tab:severance-patterns", digits=1):
+    """The per-pattern severance table, as booktabs LaTeX.
+
+    ``severance`` is ``results/preprocessing_severance.csv`` read back. Each
+    cell is the percentage of that pattern's edges the setting discards, so a
+    row is read against the ``All graph edges`` row at the bottom: a pattern
+    losing less than the graph does is one the pre-processing spares.
+
+    Written by hand rather than through :func:`to_latex` because the columns
+    carry two groups with a ``\\cmidrule`` under each, which
+    ``DataFrame.to_latex`` does not emit.
+    """
+    df = severance if dataset is None else severance[severance["dataset"] == dataset]
+    if df.empty:
+        return "% " + label + ": no rows on disk yet\n"
+
+    hubs, resolutions = _severance_settings(df["setting"].unique())
+    settings = hubs + resolutions
+    width = 2 + len(settings)
+
+    pct = df.pivot_table(index="pattern", columns="setting",
+                         values="pct_laundering_removed")
+    n_edges = df.drop_duplicates("pattern").set_index("pattern")["laundering_edges"]
+    graph = df.drop_duplicates("setting").set_index("setting")
+
+    def row(name, n, values):
+        cells = " & ".join("--" if pd.isna(v) else f"{v:.{digits}f}" for v in values)
+        return f"{name} & {int(n):,} & {cells} " + r"\\"
+
+    body = []
+    for heading, patterns in SEVERANCE_BLOCKS:
+        present = [p for p in patterns if p in pct.index]
+        if not present:
+            continue
+        if heading:
+            body.append(r"\multicolumn{" + str(width) + r"}{l}{\emph{" + heading
+                        + r"}} \\")
+        body += [row(p, n_edges[p], [pct.loc[p, c] for c in settings])
+                 for p in present]
+        body.append(r"\midrule")
+
+    if "ALL" in pct.index:
+        body.append(row(r"\textbf{All flagged edges}", n_edges["ALL"],
+                        [pct.loc["ALL", c] for c in settings]))
+    body.append(row("All graph edges", graph["edges"].iloc[0],
+                    [graph.loc[c, "pct_removed"] for c in settings]))
+
+    # Two column groups, each with its own rule and its own header format.
+    groups, rules, names = [" ", " "], [], ["Pattern", "$n$"]
+    column = 3
+    for title, members, prefix in [("Hub removal (top $k$)", hubs, "k"),
+                                   ("Louvain resolution", resolutions, "r")]:
+        if not members:
+            continue
+        groups.append(r"\multicolumn{" + str(len(members)) + r"}{c}{" + title + "}")
+        rules.append(r"\cmidrule(lr){" + str(column) + "-"
+                     + str(column + len(members) - 1) + "}")
+        for member in members:
+            value = (str(member)[len(HUBS_SEPARATOR):] if prefix == "k"
+                     else str(member).split("=")[1])
+            star = (prefix == "r" and float(value) == float(DEFAULT_RESOLUTION))
+            names.append(f"${prefix}={value}"
+                         + (r"^{\dagger}" if star else "") + "$")
+        column += len(members)
+
+    # The pattern rows over-count any edge belonging to attempts of two
+    # types, so the discrepancy is stated rather than left to be noticed.
+    typed = [p for _, block in SEVERANCE_BLOCKS for p in block if p in pct.index]
+    excess = int(n_edges[typed].sum() - n_edges.get("ALL", n_edges[typed].sum()))
+
+    # Everything a reader needs goes in the caption. A table* float puts a
+    # footnote in an odd place in a two-column layout, so there is none.
+    caption = caption or (
+        "Percentage of each pattern's edges discarded by the pre-processing on "
+        + str(df["dataset"].iloc[0]) + "; $n$ is the pattern's edge count. Hub "
+        "removal deletes the $k$ highest-degree accounts and runs no community "
+        "detection; $r$ is the Louvain resolution, $\\dagger$ the published "
+        "setting. Pattern rows over-count " + f"{excess:,}" + " edges belonging "
+        "to attempts of two types.")
+
+    return "\n".join([
+        r"\begin{table*}[t]", r"\centering", r"\small",
+        r"\caption{" + caption + "}", r"\label{" + label + "}",
+        r"\begin{tabular}{l" + "r" * (1 + len(settings)) + "}", r"\toprule",
+        " & ".join(groups) + r" \\", "".join(rules),
+        " & ".join(names) + r" \\", r"\midrule",
+        *body, r"\bottomrule", r"\end{tabular}",
+        r"\end{table*}", ""])
 
 
 def severance_table(results_dir="results", latex=True):
@@ -601,9 +740,11 @@ def severance_table(results_dir="results", latex=True):
     log["dataset"] = [parse_resolution(d)[0] for d in log["dataset"]]
     log = log.drop_duplicates(subset=["dataset", "resolution"], keep="last")
 
-    # "off" arrives as a string and the resolutions as floats, so the column
-    # is object-typed; coerce the numeric ones back for a sensible order.
-    log["resolution"] = [v if v == "off" else float(v) for v in log["resolution"]]
+    # "off" and "hubs<k>" arrive as strings and the resolutions as floats, so
+    # the column is object-typed; coerce the numeric ones back for a sensible
+    # order.
+    log["resolution"] = [v if v == "off" or _is_hubs(v) else float(v)
+                         for v in log["resolution"]]
 
     table = log.pivot_table(index="dataset", columns="resolution",
                             values="pct_severed", aggfunc="last")
@@ -614,9 +755,7 @@ def severance_table(results_dir="results", latex=True):
     table = table.apply(lambda column: column.map(
         lambda v: "--" if pd.isna(v)
         else format_cell(v, digits=2, latex=latex, basis="single")))
-    table.columns = [("no Louvain" if c == "off" else
-                      f"r={c:g}" + (" (published)" if c == DEFAULT_RESOLUTION else ""))
-                     for c in table.columns]
+    table.columns = [_setting_column(c) for c in table.columns]
     table.index.name = None
     return table
 
@@ -683,9 +822,7 @@ def pattern_splitting_table(results_dir="results", column="pct_destroyed",
         lambda v: "--" if pd.isna(v)
         else format_cell(v, digits=SPLITTING_COLUMNS[column][1], latex=latex,
                          basis="single")))
-    table.columns = [("no Louvain" if c == "off" else
-                      f"r={c:g}" + (" (published)" if c == DEFAULT_RESOLUTION else ""))
-                     for c in table.columns]
+    table.columns = [_setting_column(c) for c in table.columns]
     return table
 
 

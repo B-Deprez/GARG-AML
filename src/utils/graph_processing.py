@@ -6,7 +6,7 @@ import networkx as nx
 import numpy as np
 
 # ---------------------------------------------------------------------------
-# Louvain sensitivity
+# Pre-processing sensitivity
 # ---------------------------------------------------------------------------
 # The resolution sweep encodes **the setting in the dataset name** rather than
 # adding a parameter to every script. "HI-Small_res20" is HI-Small
@@ -19,11 +19,38 @@ import numpy as np
 # The token may sit anywhere in the name, so it composes with a bank view in
 # either order: "HI-Small_res20_bank012" and "HI-Small_bank012_res20" both
 # parse, because parse_view partitions on the first "_bank".
+#
+# "HI-Small_hubs100" is the other pre-processing arm: no Louvain, the 100
+# highest-degree accounts removed instead. It carries no resolution of its
+# own, so the token implies Louvain off unless a "_res<r>" is also given.
 RESOLUTION_SEPARATOR = "res"
 NO_LOUVAIN = "nolouvain"
+HUBS_SEPARATOR = "hubs"
 DEFAULT_RESOLUTION = 10  # the value the paper reports; see graph_community
 
 _RESOLUTION_TOKEN = re.compile(r"^" + RESOLUTION_SEPARATOR + r"(\d+(?:\.\d+)?)$")
+_HUBS_TOKEN = re.compile(r"^" + HUBS_SEPARATOR + r"(\d+)$")
+
+
+def _parse_setting(name, default=DEFAULT_RESOLUTION):
+    """``name`` -> ``(name without the tokens, resolution, hubs)``."""
+    kept, resolution, hubs, explicit = [], default, None, False
+    for part in name.split("_"):
+        if part == NO_LOUVAIN:
+            resolution, explicit = None, True
+            continue
+        match = _RESOLUTION_TOKEN.match(part)
+        if match:
+            resolution, explicit = float(match.group(1)), True
+            continue
+        match = _HUBS_TOKEN.match(part)
+        if match:
+            hubs = int(match.group(1))
+            continue
+        kept.append(part)
+    if hubs is not None and not explicit:
+        resolution = None  # hub removal replaces the Louvain step
+    return "_".join(kept), resolution, hubs
 
 
 def parse_resolution(name, default=DEFAULT_RESOLUTION):
@@ -38,29 +65,47 @@ def parse_resolution(name, default=DEFAULT_RESOLUTION):
     ('HI-Small', 20.0)
     >>> parse_resolution("HI-Small_nolouvain")
     ('HI-Small', None)
+    >>> parse_resolution("HI-Small_hubs100")
+    ('HI-Small', None)
     """
-    parts = name.split("_")
-    kept, resolution = [], default
-    for part in parts:
-        if part == NO_LOUVAIN:
-            resolution = None
-            continue
-        match = _RESOLUTION_TOKEN.match(part)
-        if match:
-            resolution = float(match.group(1))
-            continue
-        kept.append(part)
-    return "_".join(kept), resolution
+    base, resolution, _ = _parse_setting(name, default)
+    return base, resolution
+
+
+def parse_hubs(name):
+    """``name`` -> the number of hubs to remove, or ``None``.
+
+    >>> parse_hubs("HI-Small_hubs100")
+    100
+    >>> parse_hubs("HI-Small_res20") is None
+    True
+    """
+    return _parse_setting(name)[2]
+
+
+def setting_label(resolution, hubs=None):
+    """The pre-processing arm as one value: ``"off"``, ``"hubs5"`` or ``10.0``.
+
+    Shared by the severance log and the reporting tables so an arm is named
+    the same everywhere.
+    """
+    if hubs is not None:
+        return HUBS_SEPARATOR + str(hubs)
+    return "off" if resolution is None else resolution
 
 
 def strip_resolution(name):
-    """``name`` with any Louvain token removed; see :func:`parse_resolution`."""
+    """``name`` with any pre-processing token removed; see :func:`parse_resolution`."""
     return parse_resolution(name)[0]
 
 
 def reduce_graph(G, resolution=DEFAULT_RESOLUTION, dataset=None,
-                 results_dir="results"):
+                 results_dir="results", hubs=None):
     """Apply the Louvain pre-processing at ``resolution``, or not at all.
+
+    ``hubs=k`` is the other arm of the sensitivity analysis: Louvain is
+    skipped and the ``k`` highest-degree accounts are removed instead (see
+    :func:`graph_degree`). It is not combined with a resolution.
 
     ``resolution=None`` returns ``G`` unchanged: the no-Louvain arm of the
     sweep, which bounds what the pre-processing costs in detection
@@ -79,12 +124,15 @@ def reduce_graph(G, resolution=DEFAULT_RESOLUTION, dataset=None,
     ``results/louvain_severance.csv``, so every run records the share of
     edges dropped without the measure scripts having to.
     """
-    H = G if resolution is None else graph_community(G, resolution=resolution)
-    _log_severance(dataset, resolution, G, H, results_dir)
+    if hubs is not None:
+        H = graph_degree(G, n_hubs=hubs)
+    else:
+        H = G if resolution is None else graph_community(G, resolution=resolution)
+    _log_severance(dataset, setting_label(resolution, hubs), G, H, results_dir)
     return H
 
 
-def _log_severance(dataset, resolution, G, H, results_dir="results"):
+def _log_severance(dataset, setting, G, H, results_dir="results"):
     """Print the edge-severance headline; append a row when ``dataset`` is given.
 
     The CSV append is conditional because stage 1 (the measure scripts) and
@@ -96,7 +144,7 @@ def _log_severance(dataset, resolution, G, H, results_dir="results"):
     severed = before - after
     pct = 100.0 * severed / before if before else float("nan")
 
-    print(f"Louvain resolution={resolution if resolution is not None else 'off'}: "
+    print(f"Pre-processing {setting}: "
           f"{severed:,} of {before:,} edges severed ({pct:.2f}%)")
 
     if dataset is None:
@@ -104,7 +152,7 @@ def _log_severance(dataset, resolution, G, H, results_dir="results"):
 
     row = pd.DataFrame([{
         "dataset": dataset,
-        "resolution": "off" if resolution is None else resolution,
+        "resolution": setting,
         "nodes": G.number_of_nodes(),
         "edges_before": before,
         "edges_after": after,
@@ -117,23 +165,32 @@ def _log_severance(dataset, resolution, G, H, results_dir="results"):
     row.to_csv(path, mode="a", header=not os.path.exists(path), index=False)
 
 
-def graph_degree(G, degree_cutoff=0.01):
-    # Hub removal; degree_cutoff is relative, the top fraction by degree.
+def graph_degree(G, degree_cutoff=0.01, n_hubs=None):
+    # Hub removal; degree_cutoff is relative, the top fraction by degree, and
+    # n_hubs removes exactly that many highest-degree nodes instead.
     G_copy = G.copy()
-    
+
+    # Ranked on the undirected view, as community_map's partition is, so the
+    # directed and undirected runs of an arm remove the same accounts.
+    view = G.to_undirected(as_view=True) if nx.is_directed(G) else G
     degree_df = pd.DataFrame(
         dict(
-            G_copy.degree()
+            view.degree()
         ), 
         index = ["Degree"]
     ).transpose()
 
-    degree_threshold = degree_df["Degree"].quantile(1 - degree_cutoff)
-    hub_criteria = degree_df["Degree"] >= degree_threshold
-    
-    hubs_deleted = list(
-                degree_df[hub_criteria].reset_index()["index"]
-            )
+    if n_hubs is not None:
+        # nlargest keeps exactly n_hubs; a tie at the boundary is broken by
+        # node order, which is the CSV's and therefore reproducible.
+        hubs_deleted = list(degree_df["Degree"].nlargest(n_hubs).index)
+    else:
+        degree_threshold = degree_df["Degree"].quantile(1 - degree_cutoff)
+        hub_criteria = degree_df["Degree"] >= degree_threshold
+
+        hubs_deleted = list(
+                    degree_df[hub_criteria].reset_index()["index"]
+                )
 
     G_copy.remove_nodes_from(
         hubs_deleted

@@ -64,8 +64,9 @@ python scripts/gargaml_tree.py         # stage 2: train + evaluate -> results/
 | Synthetic network illustrations | `notebooks/VisualisationNetwork.ipynb` | `data/combined_synthetic_networks.pdf` |
 | Worked toy example (Appendix A) | `notebooks/toyexample.ipynb` | inline figures |
 | Edges severed by the Louvain filter | `notebooks/LouvainEdgeSeverance.ipynb` | inline table |
+| Edges removed per pre-processing setting, and the laundering edges among them | `notebooks/LouvainEdgeSeverance.ipynb` | `results/preprocessing_severance.csv` (one row per dataset and setting: edges removed, laundering edges removed, and the laundering share within what was removed) |
 | Laundering patterns destroyed by the Louvain step | `scripts/pattern_splitting.py` | `results/<dataset>_pattern_splitting.csv` (one row per laundering attempt and resolution: communities spanned, edge survival, 2-path survival), `..._summary.csv` by pattern type, and the pooled `results/pattern_splitting_summary.csv` |
-| Louvain sensitivity sweep (resolution, and no Louvain at all) | `scripts/gargaml_undirected.py`, `scripts/gargaml_directed.py`, `scripts/gargaml_tree.py`, run on the `_res<r>` / `_nolouvain` dataset names | `results/louvain_severance.csv` (edges severed per dataset and setting) plus the usual per-dataset measure and metric files under those names |
+| Pre-processing sensitivity sweep (resolution, no Louvain at all, and hub removal) | `scripts/gargaml_undirected.py`, `scripts/gargaml_directed.py`, `scripts/gargaml_tree.py`, run on the `_res<r>` / `_nolouvain` / `_hubs<k>` dataset names | `results/louvain_severance.csv` (edges severed per dataset and setting) plus the usual per-dataset measure and metric files under those names |
 | Partial-observability appendix: score on the full graph vs a bank's view | `scripts/partial_observability.py` | `results/<view>_partial_observability_accounts.csv`, `..._metrics.csv` |
 | Appendix tables and figures | `notebooks/BankObservability.ipynb` | `results/appendix_*.csv`, `results/appendix_*.pdf` |
 | Directed-vs-undirected diagnosis | `scripts/directed_diagnosis.py` | `results/<dataset>_directed_diagnosis.csv` (per node: level census, reciprocal census, five score variants), `..._summary.csv` (means by ground-truth class and structural role), `..._directed_diagnosis_metrics.csv` (each variant through the shared metrics), and the pooled `results/directed_diagnosis_{summary,metrics}.csv` |
@@ -115,7 +116,7 @@ from `results-0/` and `results-aa/`.
   ranked over every account. A `--` is a cell that could not be evaluated and
   a starred cell is a mean over fewer folds than the rest; both are reported
   rather than dropped.
-- **Louvain setting.** The pre-processing resolution rides in the dataset
+- **Pre-processing setting.** It rides in the dataset
   name, the same way a bank view does: `HI-Small_res20` is HI-Small reduced at
   resolution 20, `HI-Small_nolouvain` skips the reduction entirely, and a bare
   `HI-Small` keeps the published value of 10, so existing result files are
@@ -123,6 +124,14 @@ from `results-0/` and `results-aa/`.
   appends it to `results/louvain_severance.csv`. The no-Louvain arm is far more
   than a slower run: the reduction is what bounds the second-order ego graphs,
   and without it a single HI-Small node can densify to roughly 1.8 GB.
+- **Hub removal.** `HI-Small_hubs100` is the second sensitivity arm: Louvain is
+  not run, and the 100 highest-degree accounts are deleted instead. The arms
+  are `_hubs5` / `_hubs10` / `_hubs100`, ranked on the undirected view so the
+  directed and undirected runs delete the same accounts. They cost what the
+  no-Louvain arm costs, since they leave 93-96 % of the edges in place. The
+  removed hubs have no score, so they are dropped from the evaluation rather
+  than left at the unscored sentinel, and `scripts/gargaml_tree.py` prints how
+  many were dropped and how many of those had a laundering transaction.
 - **Per-dataset sweep reductions.** `DATASET_SETTINGS` in
   `scripts/gargaml_tree.py` narrows the cut-off/pattern grid for one dataset
   without touching the defaults: LI-Large runs the headline cut-offs

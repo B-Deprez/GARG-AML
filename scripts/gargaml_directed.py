@@ -17,7 +17,7 @@ warnings.simplefilter(action='ignore', category=FutureWarning)
 
 from src.data.graph_construction import construct_IBM_graph, construct_synthetic_graph
 from src.data.bank_views import parse_view, trans_path
-from src.utils.graph_processing import parse_resolution, reduce_graph
+from src.utils.graph_processing import parse_hubs, parse_resolution, reduce_graph
 from src.methods.GARGAML import GARG_AML_node_directed_measures
 from src.utils.runtime import (env_override, select_datasets, echo_config,
                               should_skip, write_csv, log_timing, resolve_results_dir)
@@ -51,8 +51,9 @@ def process_node(node):
 
 # Datasets to process, ordered smallest first; comment out what is not needed.
 # In a name, a plain dataset is the full graph, "_bank<b>" / "_banktop<k>" a
-# single-institution view, "_res<r>" a Louvain resolution and "_nolouvain" no
-# reduction at all (see src/utils/graph_processing.parse_resolution). The name
+# single-institution view, "_res<r>" a Louvain resolution, "_nolouvain" no
+# reduction at all and "_hubs<k>" hub removal instead of Louvain (see
+# src/utils/graph_processing.parse_resolution). The name
 # is used verbatim in the output path, so each entry writes its own measures
 # and OVERWRITES that file in place. LI-Large and the no-Louvain arms are the
 # expensive runs. Stage 2 (gargaml_tree.py) skips a dataset whose measures are
@@ -62,7 +63,8 @@ datasets = ["HI-Small_bank012", "HI-Small_banktop50",
             "HI-Small",                        # default resolution 10
             "HI-Small_res20", "HI-Small_res50",
             "LI-Large",
-            "HI-Small_nolouvain", "LI-Large_nolouvain"]
+            "HI-Small_nolouvain", "LI-Large_nolouvain",
+            "HI-Small_hubs5", "HI-Small_hubs10", "HI-Small_hubs100"]
 directed = True
 # Parallelism: use up to 4 or half of CPUs
 n_cpu = min(4, cpu_count() // 2)
@@ -95,9 +97,10 @@ if __name__ == '__main__':
         if banks is not None:
             print(f"Single-bank view of {base}: banks {banks}")
         
-        # The Louvain setting comes from the dataset name. Passing the dataset
-        # makes this stage own the edge-severance record.
-        G_reduced = reduce_graph(G, parse_resolution(dataset)[1], dataset)
+        # The pre-processing setting comes from the dataset name. Passing the
+        # dataset makes this stage own the edge-severance record.
+        G_reduced = reduce_graph(G, parse_resolution(dataset)[1], dataset,
+                                 hubs=parse_hubs(dataset))
 
         G_reduced_und = G_reduced.to_undirected()
         G_reduced_rev = G_reduced.reverse(copy=True)

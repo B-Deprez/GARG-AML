@@ -15,6 +15,7 @@
 #            --array=7       LI-Large              needs the overrides below
 #            --array=8       HI-Small_nolouvain    needs the overrides below
 #            --array=9       LI-Large_nolouvain    expected infeasible, see README
+#            --array=10,11,12 hub removal instead of Louvain; same cost as index 8
 # PREREQ   None -- stage 1 reads only data/. This is the head of the chain.
 # RESUMES  Yes, at dataset granularity. The script skips a dataset whose output
 #          CSV already exists, so resubmitting the same array is the recovery
