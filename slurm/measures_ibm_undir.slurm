@@ -38,8 +38,8 @@
 #          larger ego graphs.
 
 #SBATCH --job-name=gargaml_meas_ibm_undir
-#SBATCH --output=gargaml_meas_ibm_undir_%A_%a.out
-#SBATCH --error=gargaml_meas_ibm_undir_%A_%a.err
+#SBATCH --output=slurm/logs/gargaml_meas_ibm_undir_%A_%a.out
+#SBATCH --error=slurm/logs/gargaml_meas_ibm_undir_%A_%a.err
 
 #SBATCH --cluster=wice
 #SBATCH --partition=batch

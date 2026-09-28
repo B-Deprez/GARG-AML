@@ -18,8 +18,8 @@
 #          different one.
 
 #SBATCH --job-name=gargaml_tree_blocks
-#SBATCH --output=gargaml_tree_blocks.out
-#SBATCH --error=gargaml_tree_blocks.err
+#SBATCH --output=slurm/logs/gargaml_tree_blocks.out
+#SBATCH --error=slurm/logs/gargaml_tree_blocks.err
 
 #SBATCH --cluster=wice
 #SBATCH --partition=batch

@@ -26,8 +26,8 @@
 #          selects nothing here -- it runs HI-Small and LI-Large both.
 
 #SBATCH --job-name=gargaml_dist_scores
-#SBATCH --output=gargaml_dist_scores.out
-#SBATCH --error=gargaml_dist_scores.err
+#SBATCH --output=slurm/logs/gargaml_dist_scores.out
+#SBATCH --error=slurm/logs/gargaml_dist_scores.err
 
 #SBATCH --cluster=wice
 #SBATCH --partition=batch

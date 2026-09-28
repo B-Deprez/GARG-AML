@@ -23,8 +23,8 @@
 # TIME     02:00:00 -- 66 datasets x a handful of cheap fits each.
 
 #SBATCH --job-name=gargaml_tree_synth
-#SBATCH --output=gargaml_tree_synth.out
-#SBATCH --error=gargaml_tree_synth.err
+#SBATCH --output=slurm/logs/gargaml_tree_synth.out
+#SBATCH --error=slurm/logs/gargaml_tree_synth.err
 
 #SBATCH --cluster=wice
 #SBATCH --partition=batch

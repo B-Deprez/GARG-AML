@@ -28,8 +28,8 @@
 #          nodes), which takes hours; 12 h is deliberate headroom for top50.
 
 #SBATCH --job-name=gargaml_partial_obs
-#SBATCH --output=gargaml_partial_obs.out
-#SBATCH --error=gargaml_partial_obs.err
+#SBATCH --output=slurm/logs/gargaml_partial_obs.out
+#SBATCH --error=slurm/logs/gargaml_partial_obs.err
 
 #SBATCH --cluster=wice
 #SBATCH --partition=batch

@@ -31,8 +31,10 @@
 #          reduced graph are held, and the sweep keeps per-cell score arrays.
 #          Headroom over that, not a measured peak.
 #          LI-Large: --time=16:00:00 --mem=200g.
-# TIME     06:00:00 for HI-Small, where a 5-fold run takes tens of minutes to
-#          hours depending on the sweep; LI-Large gets 16 h.
+# TIME     16:00:00 for HI-Small: job 62151480 (2026-09-25) was killed by the
+#          06:00:00 limit 3.2 of 7 direction/feature-config sections in --
+#          task 3's four feature configs made the sweep bigger than the old
+#          06:00:00 estimate accounted for. LI-Large also gets 16 h.
 #
 # KNOBS    GARGAML_N_FOLDS picks the split: 0 is a single 70/30 split, 2 or more
 #          is that many stratified folds. Use 2 when checking a code change
@@ -42,15 +44,15 @@
 #          constants by hand.
 
 #SBATCH --job-name=gargaml_tree
-#SBATCH --output=gargaml_tree_%A_%a.out
-#SBATCH --error=gargaml_tree_%A_%a.err
+#SBATCH --output=slurm/logs/gargaml_tree_%A_%a.out
+#SBATCH --error=slurm/logs/gargaml_tree_%A_%a.err
 
 #SBATCH --cluster=wice
 #SBATCH --partition=batch
 #SBATCH --array=4
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
-#SBATCH --time=06:00:00
+#SBATCH --time=16:00:00
 #SBATCH --mem=64g
 #SBATCH --account=lp_verbekelab
 #SBATCH --mail-type=FAIL,BEGIN,END

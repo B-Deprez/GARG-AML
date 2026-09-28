@@ -21,8 +21,8 @@
 #          pool. Keep it as one job.
 
 #SBATCH --job-name=gargaml_directed_diagnosis
-#SBATCH --output=gargaml_directed_diagnosis.out
-#SBATCH --error=gargaml_directed_diagnosis.err
+#SBATCH --output=slurm/logs/gargaml_directed_diagnosis.out
+#SBATCH --error=slurm/logs/gargaml_directed_diagnosis.err
 
 #SBATCH --cluster=wice
 #SBATCH --partition=batch

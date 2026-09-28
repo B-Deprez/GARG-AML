@@ -28,8 +28,8 @@
 #          table too; see slurm/README.md.
 
 #SBATCH --job-name=gargaml_collect
-#SBATCH --output=gargaml_collect.out
-#SBATCH --error=gargaml_collect.err
+#SBATCH --output=slurm/logs/gargaml_collect.out
+#SBATCH --error=slurm/logs/gargaml_collect.err
 
 #SBATCH --cluster=wice
 #SBATCH --partition=batch

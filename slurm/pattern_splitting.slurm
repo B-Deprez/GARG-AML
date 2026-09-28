@@ -28,8 +28,8 @@
 #          the pool afterwards.
 
 #SBATCH --job-name=gargaml_pattern_splitting
-#SBATCH --output=gargaml_pattern_splitting.out
-#SBATCH --error=gargaml_pattern_splitting.err
+#SBATCH --output=slurm/logs/gargaml_pattern_splitting.out
+#SBATCH --error=slurm/logs/gargaml_pattern_splitting.err
 
 #SBATCH --cluster=wice
 #SBATCH --partition=batch

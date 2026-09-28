@@ -17,8 +17,8 @@
 #          own `dataset = "HI-Small"` constant to run a different one.
 
 #SBATCH --job-name=gargaml_if
-#SBATCH --output=gargaml_if.out
-#SBATCH --error=gargaml_if.err
+#SBATCH --output=slurm/logs/gargaml_if.out
+#SBATCH --error=slurm/logs/gargaml_if.err
 
 #SBATCH --cluster=wice
 #SBATCH --partition=batch

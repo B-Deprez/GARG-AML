@@ -29,8 +29,8 @@
 #          headroom over the median, not a measured bound.
 
 #SBATCH --job-name=gargaml_meas_synth_dir
-#SBATCH --output=gargaml_meas_synth_dir_%A_%a.out
-#SBATCH --error=gargaml_meas_synth_dir_%A_%a.err
+#SBATCH --output=slurm/logs/gargaml_meas_synth_dir_%A_%a.out
+#SBATCH --error=slurm/logs/gargaml_meas_synth_dir_%A_%a.err
 
 #SBATCH --cluster=wice
 #SBATCH --partition=batch

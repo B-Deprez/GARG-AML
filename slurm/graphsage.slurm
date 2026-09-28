@@ -55,8 +55,8 @@
 #          tree models' full cut-off x target sweep -- do not assume parity.
 
 #SBATCH --job-name=gargaml_graphsage
-#SBATCH --output=gargaml_graphsage.out
-#SBATCH --error=gargaml_graphsage.err
+#SBATCH --output=slurm/logs/gargaml_graphsage.out
+#SBATCH --error=slurm/logs/gargaml_graphsage.err
 
 #SBATCH --cluster=wice
 #SBATCH --partition=gpu_a100

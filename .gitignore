@@ -84,13 +84,13 @@ notebooks/TestCode.ipynb
 notebooks/Transfer.ipynb
 
 # --- Slurm job logs --------------------------------------------------------
-# The .slurm scripts write their stdout/stderr as plain files in the repo root,
-# beside the code, so a failed run is one `less` away without hunting through a
-# log directory. They are per-run output, not source, and an array job drops one
+# The .slurm scripts write their stdout/stderr into slurm/logs/, beside the
+# job scripts. They are per-run output, not source, and an array job drops one
 # pair per task -- they would otherwise fill `git status` after every submission.
-# The harness itself (slurm/*.slurm, slurm/*.sh, slurm/README.md) IS tracked.
-*.out
-*.err
+# The harness itself (slurm/*.slurm, slurm/*.sh, slurm/README.md) IS tracked,
+# and slurm/logs/.gitkeep keeps the directory present after a fresh clone.
+slurm/logs/*.out
+slurm/logs/*.err
 
 # --- Python ----------------------------------------------------------------
 __pycache__/
