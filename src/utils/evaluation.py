@@ -424,6 +424,54 @@ def metric_records(metrics, status="ok", n_test=np.nan, n_pos=np.nan, **context)
     return records
 
 
+# The nine columns Tables 7-8 report: the overall flag plus the eight
+# injected pattern types. "Not Classified" is deliberately excluded -- it is
+# the leftover bucket, not one of the reported rows.
+LABEL_DISTRIBUTION_TARGETS = ["Is Laundering", "FAN-OUT", "FAN-IN", "GATHER-SCATTER",
+                              "SCATTER-GATHER", "CYCLE", "RANDOM", "BIPARTITE", "STACK"]
+
+
+def label_imbalance_records(dataset, path_trans=None, path_patterns=None, banks=None,
+                            cutoffs=None, targets=None):
+    """Tidy ``imbalance`` rows for Tables 7-8, straight from the label data.
+
+    ``imbalance`` (``scripts/gargaml_tree.py::_fit_and_record``) is the
+    fraction of accounts labelled 1 at a (cutoff, target) cell -- computed
+    there as ``y_train.mean()`` on a stratified split, which equals the
+    population proportion by construction. It depends only on
+    ``src/data/pattern_construction.py``'s label construction, never on a
+    GARG-AML score, a Louvain reduction or a model fit, so this recomputes it
+    directly rather than through ``gargaml_tree.py``'s ``data_preparation()``
+    -- which additionally builds/reduces the graph and fits every model --
+    and is therefore cheap even for LI-Large.
+
+    Model- and direction-independent by construction: the two directions'
+    ``imbalance_combined.csv`` files are meant to be identical, and are for
+    HI-Small; feeding this into both is correct, not redundant.
+    """
+    from src.data.bank_views import patterns_path, trans_path
+    from src.data.pattern_construction import define_ML_labels, summarise_ML_labels
+
+    cutoffs = CUT_OFFS if cutoffs is None else cutoffs
+    targets = LABEL_DISTRIBUTION_TARGETS if targets is None else targets
+
+    transactions_df_extended, pattern_columns = define_ML_labels(
+        path_trans=path_trans or trans_path(dataset),
+        path_patterns=path_patterns or patterns_path(dataset),
+        banks=banks,
+    )
+    laundering_combined, _, _ = summarise_ML_labels(transactions_df_extended, pattern_columns)
+
+    records = []
+    for cutoff in cutoffs:
+        for target in targets:
+            y = (laundering_combined[target] > cutoff).astype(int)
+            records += metric_records(
+                {"imbalance": y.mean()}, n_test=len(y), n_pos=int(y.sum()),
+                model="", dataset=dataset, cutoff=cutoff, target=target)
+    return records
+
+
 def metrics_frame(records):
     """Tidy DataFrame from the record list, with a stable column order.
 

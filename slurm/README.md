@@ -100,6 +100,10 @@ ps=$(slurm/submit.sh  slurm/pattern_splitting.slurm HI-Small)
 po1=$(slurm/submit.sh slurm/partial_obs.slurm 012)
 po2=$(slurm/submit.sh slurm/partial_obs.slurm top50)
 dd=$(sbatch --parsable slurm/directed_diagnosis.slurm | cut -d";" -f1)
+# Tables 7-8's label-percentage matrices -- reads only data/, not fed into
+# collect.slurm (build_tables.py doesn't touch these; DistributionScores.ipynb
+# reads the CSV directly).
+ld=$(slurm/submit.sh  slurm/label_distribution.slurm HI-Small)
 
 # --- Reporting (1 core, minutes) -------------------------------------------
 # afterANY, so one failed arm does not block the tables: build_tables.py
@@ -115,6 +119,11 @@ d7=$(slurm/submit.sh slurm/measures_ibm_dir.slurm   LI-Large --array=7 --time=16
 u7=$(slurm/submit.sh slurm/measures_ibm_undir.slurm LI-Large --array=7 --time=16:00:00 --mem=200g)
 slurm/submit.sh slurm/tree.slurm LI-Large --array=7 --time=16:00:00 --mem=200g \
   --dependency=afterok:$d7:$u7
+
+# label_distribution.slurm needs no stage-1 measures, but LI-Large's own
+# Trans.csv read is the unmeasured cost (see the job's own header) -- give it
+# the same headroom until it's timed.
+slurm/submit.sh slurm/label_distribution.slurm LI-Large --time=16:00:00 --mem=200g
 ```
 
 ---
