@@ -41,7 +41,7 @@ Running a script bare behaves exactly as it always has.
 | `GARGAML_DATASET` | one dataset name, used verbatim |
 | `GARGAML_DATASETS` | comma-separated work list |
 | `GARGAML_DATASET_INDEX` / `SLURM_ARRAY_TASK_ID` | index into the script's own list |
-| `GARGAML_N_CPU` | worker-pool width (see the caveat below) |
+| `GARGAML_N_CPU` | worker-pool width: a fixed `min(4, cpu_count() // 2)` for the measure scripts, `SLURM_CPUS_PER_TASK` for `gargaml_tree.py`, where `1` means serial (see the caveat below) |
 | `GARGAML_N_FOLDS` | `gargaml_tree.py` split protocol; `2` is the cheap test setting |
 | `GARGAML_CONFIGS` | GraphSAGE feature configs (`topology`, `attributes`) |
 | `GARGAML_INSTITUTIONS` | `partial_observability.py` bank view |
@@ -112,12 +112,14 @@ slurm/submit.sh slurm/collect.slurm all \
   --dependency=afterany:$tree:$blk:$ifj:$ts:$gs:$ps:$po1:$po2:$dd
 ```
 
-LI-Large is the documented 16 h / 200 GB job and needs explicit overrides:
+LI-Large is the documented 16 h / 200 GB job and needs explicit overrides
+(the tree job's `--cpus-per-task=36` is already its default, repeated so the
+line states the whole allocation):
 
 ```bash
 d7=$(slurm/submit.sh slurm/measures_ibm_dir.slurm   LI-Large --array=7 --time=16:00:00 --mem=200g)
 u7=$(slurm/submit.sh slurm/measures_ibm_undir.slurm LI-Large --array=7 --time=16:00:00 --mem=200g)
-slurm/submit.sh slurm/tree.slurm LI-Large --array=7 --time=16:00:00 --mem=200g \
+slurm/submit.sh slurm/tree.slurm LI-Large --array=7 --cpus-per-task=36 --time=16:00:00 --mem=200g \
   --dependency=afterok:$d7:$u7
 
 # label_distribution.slurm needs no stage-1 measures, but LI-Large's own
@@ -178,8 +180,11 @@ sbatch --array=22-43 --time=02:00:00 --mem=16g slurm/measures_synth_dir.slurm
 GARGAML_FORCE=1 sbatch --array=44-65 --time=24:00:00 --mem=64g slurm/measures_synth_dir.slurm
 ```
 
-Stage 2 and GraphSAGE do **not** resume at cell granularity — their metric
-writers run after the loops, not inside them. GraphSAGE checkpoints every epoch
+Stage 2 and GraphSAGE do **not** resume at cell granularity. `gargaml_tree.py`
+writes each direction/feature-config section's files when that section
+finishes, so a wall-time kill loses only the section in progress — but nothing
+skips finished sections, so a resubmission refits all of them. GraphSAGE's
+metric writers run after the loops, not inside them: it checkpoints every epoch
 and resumes mid-fold, but a wall-time kill still loses the metrics of every
 completed fit while keeping their checkpoints. Size `--time` to finish.
 
@@ -250,13 +255,22 @@ the scalability figure.
 
 ## Choices made here, and how to change them
 
-**Worker count is not auto-detected.** All four measure scripts cap their pool
+**Worker count is not auto-detected in stage 1.** All four measure scripts cap their pool
 at `min(4, cpu_count() // 2)`, and that is left alone on purpose: runtime is a
 *published result* here, so worker count and node sharing change reported
 numbers, not just throughput. The consequence is arithmetic — `--cpus-per-task=8`
 is what yields the intended 4 workers. Sixteen cores leave twelve idle, and
 `--cpus-per-task=1` makes `Pool(processes=0)`, which raises. `GARGAML_N_CPU`
 overrides it if you decide to change the published basis; log that decision.
+
+`gargaml_tree.py` is the exception, and follows the allocation: its pool width
+defaults to `SLURM_CPUS_PER_TASK` (else `min(4, cpu_count() // 2)`), and
+`GARGAML_N_CPU=1` fits serially with no pool. No runtime from stage 2 is
+reported, and its outputs are byte-identical for any width — every estimator is
+seeded and single-threaded, and records are reassembled in grid order — so the
+width buys throughput and nothing else. It matters: the serial grid is ~20 h of
+single-core fitting on HI-Small, which is why job 62171623 hit its 16 h limit
+with 19 of 20 cores idle. `tree.slurm` asks for 36, half a wICE thin node.
 
 **Wall times are mostly headroom, not measurements.** The archived
 `time_results_*.txt` files record only `<dataset>: <seconds>` with no job, host

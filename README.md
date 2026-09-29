@@ -107,6 +107,11 @@ from `results-0/` and `results-aa/`.
   Under `N_FOLDS >= 2` the historical `_combined.csv` matrices hold the **mean
   over folds** rather than a single split's value — same filenames and shape,
   a different quantity — with `_std_combined.csv` companions beside them.
+- **Parallel fits.** `scripts/gargaml_tree.py` fits its (cut-off, target, fold)
+  splits in a process pool. `GARGAML_N_CPU` sets the width; it defaults to the
+  Slurm allocation (`SLURM_CPUS_PER_TASK`), else `min(4, cpu_count() // 2)`,
+  and `1` fits serially. Every estimator is seeded and single-threaded, so the
+  results are identical for any width.
 - **Reading the tables.** `scripts/build_tables.py` assembles every table from
   the tidy metrics and never mixes the three kinds of row the `fold` column
   distinguishes: per-fold (`>= 0`) gives the mean and spread, pooled

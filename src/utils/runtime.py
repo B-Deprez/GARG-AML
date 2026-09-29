@@ -113,6 +113,17 @@ def select_datasets(default_datasets):
     return [default_datasets[index]]
 
 
+def allocated_cpus(fallback):
+    """CPUs Slurm allocated to this task (``SLURM_CPUS_PER_TASK``), else *fallback*.
+
+    Only for pools whose width changes throughput and nothing else. The
+    measure scripts deliberately keep a fixed cap instead: their runtime is a
+    reported result, so their worker count must not follow the allocation.
+    """
+    raw = os.environ.get("SLURM_CPUS_PER_TASK", "").strip()
+    return int(raw) if raw else fallback
+
+
 def resolve_results_dir(default="results"):
     """``GARGAML_RESULTS_DIR`` override, or *default* when unset.
 

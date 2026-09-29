@@ -312,6 +312,11 @@ python scripts/gargaml_tree.py          # step 2: train/evaluate       -> result
 
 Requirements: **networkx >= 3.0** (`nx.community.louvain_communities`). Measure scripts
 parallelise via `multiprocessing.Pool`, capped at `min(4, cpu_count() // 2)` workers.
+`gargaml_tree.py` fits its (cut-off, target, fold) splits in a spawn pool whose width
+follows `SLURM_CPUS_PER_TASK` (`GARGAML_N_CPU` overrides, `1` = serial); outputs are
+byte-identical for any width and no stage-2 runtime is reported, so unlike stage 1's cap
+the width need not be fixed. Serially the HI-Small grid is ~20 h of single-core fitting,
+which is why job 62171623 hit its 16 h limit.
 
 **Reproducibility:** Louvain uses `seed=1997`; sklearn splits/models use
 `random_state=1997` — including the `DecisionTreeClassifier`, which was missing it in

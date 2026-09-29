@@ -7,10 +7,23 @@
 # SUBMIT   sbatch slurm/tree_blocks.slurm
 # ARRAY    None.
 # PREREQ   The same stage-1 measures as slurm/tree.slurm, same dataset name.
-# RESUMES  No -- same end-of-run metric writes as tree.slurm.
-# CPUS/MEM 8 / 64g, identical reasoning to tree.slurm: one feature config
-#          instead of four, so this is the cheaper job.
-# TIME     02:00:00 -- one config of tree.slurm's four.
+# RESUMES  Per section, as in tree.slurm: each of its two sections (blocks,
+#          undirected then directed) writes its files when it finishes, a kill
+#          loses only the one in progress, and a resubmission refits both.
+# CPUS/MEM 18 / 64g. The same spawn pool as tree.slurm (it goes through the same
+#          run_config): width from SLURM_CPUS_PER_TASK or GARGAML_N_CPU, outputs
+#          byte-identical for any width. 18 rather than 36 because 6 + 18
+#          features over two sections is about a quarter of tree.slurm's
+#          cell-feature cost, and a quarter node is easier to schedule. No
+#          graph or Louvain is built, and each worker's matrix is narrower than
+#          tree.slurm's, so an estimated 0.5-1 GB per worker at most, 9-18 GB
+#          for 18. Headroom over that, not a measured peak.
+# TIME     02:00:00. By tree.slurm's cost fit (~16.5 s per cell-feature, 46
+#          fitted cells per section) this is an estimated ~5 h of single-core
+#          fitting -- more than 02:00:00 allowed when the fits were serial -- so
+#          roughly 20-40 min on 18 workers, plus two label builds from the
+#          transaction CSV (unmeasured). Replace with the per-section "fitted
+#          <n> splits" log lines from the first run.
 #
 # NOTE     gargaml_tree_blocks.py holds its dataset choice inside main(), not
 #          at module scope, so there is no env var to select a dataset here.
@@ -24,7 +37,7 @@
 #SBATCH --cluster=wice
 #SBATCH --partition=batch
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=8
+#SBATCH --cpus-per-task=18
 #SBATCH --time=02:00:00
 #SBATCH --mem=64g
 #SBATCH --account=lp_verbekelab
