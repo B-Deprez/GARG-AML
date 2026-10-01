@@ -145,6 +145,16 @@ def _structure_from_networkx(path, banks=None):
     return data.edge_index.numpy(), node_order
 
 
+def graph_cache_paths(dataset, config, results_dir="results"):
+    """The structure and feature cache files ``build_graph_data`` reads for ``config``.
+
+    One place for both filenames, so a caller can tell whether a build will
+    be a cache load before it runs one.
+    """
+    return (results_dir+"/"+dataset+"_graphsage_structure.pt",
+            results_dir+"/"+dataset+"_graphsage_x_"+config+".pt")
+
+
 def build_graph_structure(dataset, results_dir="results", backend="pandas", cache=True):
     """Build (or load) the undirected graph structure for ``dataset``.
 
@@ -159,7 +169,7 @@ def build_graph_structure(dataset, results_dir="results", backend="pandas", cach
     through the graph but are not part of the evaluated population (see
     ``scripts/graphsage_baseline.py``).
     """
-    cache_path = results_dir+"/"+dataset+"_graphsage_structure.pt"
+    cache_path = graph_cache_paths(dataset, "topology", results_dir)[0]
     if cache and os.path.exists(cache_path):
         cached = torch.load(cache_path, weights_only=False)
         return cached["edge_index"], cached["node_order"], cached["degree"]
@@ -332,7 +342,7 @@ def build_features(dataset, node_order, degree, config, results_dir="results", c
     expensive part of a sweep and identical across every cut-off and fold.
     """
     check_config(config)
-    cache_path = results_dir+"/"+dataset+"_graphsage_x_"+config+".pt"
+    cache_path = graph_cache_paths(dataset, config, results_dir)[1]
     if cache and os.path.exists(cache_path):
         return torch.load(cache_path, weights_only=False)
 

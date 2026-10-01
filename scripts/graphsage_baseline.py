@@ -28,6 +28,19 @@ SCATTER-GATHER). Widen ``DATASETS`` below to extend it.
 A cell with too few positives to fit -- cut-off 0.9 on some targets -- is
 reported as NaN with a reason, never dropped.
 
+Preparing on a CPU node
+-----------------------
+``GARGAML_PREPARE_ONLY=1`` builds and caches everything the fits read -- the
+per-account labels, the graph structure and both feature matrices -- and
+exits without fitting. It needs no GPU and no folds file. The label build is
+the baseline's host-memory peak (166.6 GiB MaxRSS on LI-Large, measured on
+label_distribution.py's identical call, job 62206918), while wICE's gpu_a100
+partition allows at most 126,000 MiB per GPU. So LI-Large is prepared in a
+CPU job (slurm/graphsage_prep.slurm) and the GPU job only loads the caches.
+A preprocessing time measured in the GPU job is then a cache load: the cold
+build times are in ``<dataset>_graphsage_prep.csv``, and every preprocessing
+row carries ``preprocess_from_cache``.
+
 Outputs (per feature config)
 ----------------------------
   * ``results/<dataset>_undirected<suffix>_metrics.csv`` -- the tidy frame,
@@ -43,10 +56,21 @@ Outputs (per feature config)
     config, cut-off, target, fold) with every metric, the timings, peak
     memory, epochs to early stop and status
   * ``results/<dataset>_graphsage_summary.csv`` -- mean/std across folds
+
+Caches (per dataset, shared by both configs where they can be)
+-------------------------------------------------------------
+  * ``results/<dataset>_graphsage_labels.pkl`` -- the per-account label table
+  * ``results/<dataset>_graphsage_structure.pt`` and
+    ``results/<dataset>_graphsage_x_<config>.pt`` -- structure and features
+  * ``results/<dataset>_graphsage_prep.csv`` -- prepare-only runs: seconds and
+    peak host memory per step, and whether the step was a cache load
+
+None of the caches is ever invalidated; delete one to rebuild it.
 """
 
 import os
 import sys
+import time
 
 DIR = "./"
 os.chdir(DIR)
@@ -64,6 +88,7 @@ from src.methods.graphsage import (
     build_graph_data,
     feature_schema,
     get_device,
+    graph_cache_paths,
     peak_gpu_memory_mb,
     peak_host_memory_mb,
     reset_peak_gpu_memory,
@@ -82,7 +107,7 @@ from src.utils.evaluation import (
 )
 from src.utils.naming import pretty_config
 from src.utils.runtime import (env_override, select_datasets, echo_config, as_list,
-                              resolve_results_dir)
+                              as_bool, resolve_results_dir, write_csv)
 
 MODEL_KEY = "graphsage_u"  # see src/utils/naming.py
 
@@ -126,6 +151,10 @@ CHECKPOINT_DIR = env_override(
     os.path.join(os.environ["VSC_SCRATCH"], "gargaml", "checkpoints")
     if os.environ.get("VSC_SCRATCH") else RESULTS_DIR+"/checkpoints")
 
+# GARGAML_PREPARE_ONLY=1: build the label, structure and feature caches and
+# exit without fitting -- see "Preparing on a CPU node" above.
+PREPARE_ONLY = env_override("prepare_only", False, as_bool)
+
 # No N_FOLDS constant: the fold count and the fold values trained on are read
 # from results/<dataset>_folds.csv, so a local constant cannot drift out of
 # sync with the partition on disk.
@@ -140,13 +169,27 @@ if DATASET.startswith("synthetic"):
     )
 
 
+def labels_cache_path(dataset):
+    """Where ``load_labels`` caches the per-account label table."""
+    return RESULTS_DIR+"/"+dataset+"_graphsage_labels.pkl"
+
+
 def load_labels(dataset):
     """Per-account label table -- the same functions gargaml_tree.py uses.
 
     For a bank view this is restricted to the bank's own clients, so the
     evaluated population matches gargaml_tree.py's and the two models stay
     comparable fold for fold.
+
+    Cached at ``labels_cache_path``: the table is identical for every config,
+    cut-off and fold, and building it is the baseline's host-memory peak.
+    Pickled rather than CSV so the account index round-trips exactly.
     """
+    cache_path = labels_cache_path(dataset)
+    if os.path.exists(cache_path):
+        print("labels <- "+cache_path)
+        return pd.read_pickle(cache_path)
+
     _, banks = parse_view(dataset)
     # Expand a group spec ("top50") before bank_clients filters on it;
     # src.methods.graphsage resolves the same way, so the graph and the
@@ -162,6 +205,14 @@ def load_labels(dataset):
     if banks is not None:
         clients = bank_clients(transactions_df_extended, banks)
         laundering_combined = laundering_combined[laundering_combined.index.isin(clients)]
+
+    # Temp file + os.replace, so a job killed mid-write cannot leave a
+    # truncated pickle for the next run to load.
+    os.makedirs(RESULTS_DIR, exist_ok=True)
+    tmp = cache_path+".tmp"+str(os.getpid())
+    laundering_combined.to_pickle(tmp)
+    os.replace(tmp, cache_path)
+    print("labels -> "+cache_path)
 
     return laundering_combined
 
@@ -372,10 +423,17 @@ def main():
         suffix = CONFIG_SUFFIXES[config]
         print("\n=== "+dataset+", "+pretty_config(MODEL_KEY, config)+" ===")
 
-        data, node_order, preprocess_seconds = build_graph_data(dataset, config=config)
+        # Checked before the build: once it has run, the caches exist either way.
+        from_cache = all(os.path.exists(p) for p in graph_cache_paths(dataset, config, RESULTS_DIR))
+        data, node_order, preprocess_seconds = build_graph_data(dataset, config=config,
+                                                                results_dir=RESULTS_DIR)
         print("  "+str(len(node_order))+" nodes, "+str(data.num_edges)+" directed entries, "
-              +str(data.num_node_features)+" features, built in "
+              +str(data.num_node_features)+" features, "
+              +("loaded from cache" if from_cache else "built")+" in "
               +format(preprocess_seconds, ".1f")+" s")
+        if from_cache:
+            print("  preprocess_seconds is a cache load here; a prepared cold build "
+                  "time is in "+prep_path(dataset))
 
         # Both configs share one node order (same structure, different
         # features), so this is computed once and reused.
@@ -397,6 +455,7 @@ def main():
         # spurious row and column to each matrix file.
         preprocess_records = metric_records(
             {"preprocess_seconds": preprocess_seconds,
+             "preprocess_from_cache": float(from_cache),
              "peak_host_mb_after_preprocess": peak_host_memory_mb()},
             status="ok", model=MODEL_KEY, dataset=dataset, direction="undirected",
             features=config, cutoff=np.nan, target="(all)", seed=SEED, fold=np.nan)
@@ -434,8 +493,53 @@ def main():
     print("fold summary  -> "+summary_path)
 
 
+def prep_path(dataset):
+    """Where ``prepare`` records what each cache build cost."""
+    return RESULTS_DIR+"/"+dataset+"_graphsage_prep.csv"
+
+
+def prepare(dataset):
+    """Build every cache the fits read, record what each step cost, and stop.
+
+    Labels, structure and features come from data/ alone, so this needs no
+    GPU and no folds file and can run before the tree job has finished. A
+    step whose cache already existed is a load, and is flagged ``from_cache``.
+    """
+    rows = []
+
+    from_cache = os.path.exists(labels_cache_path(dataset))
+    started = time.perf_counter()
+    laundering_combined = load_labels(dataset)
+    rows.append(dict(dataset=dataset, step="labels", from_cache=from_cache,
+                     seconds=time.perf_counter() - started,
+                     peak_host_mb=peak_host_memory_mb()))
+    print("  "+str(len(laundering_combined))+" labelled accounts, "
+          +("loaded" if from_cache else "built")+" in "
+          +format(rows[-1]["seconds"], ".1f")+" s")
+    del laundering_combined
+
+    for config in CONFIGS:
+        from_cache = all(os.path.exists(p) for p in graph_cache_paths(dataset, config, RESULTS_DIR))
+        data, node_order, seconds = build_graph_data(dataset, config=config,
+                                                     results_dir=RESULTS_DIR)
+        print("  "+config+": "+str(len(node_order))+" nodes, "+str(data.num_edges)
+              +" directed entries, "+str(data.num_node_features)+" features, "
+              +("loaded" if from_cache else "built")+" in "+format(seconds, ".1f")+" s")
+        rows.append(dict(dataset=dataset, step=config, from_cache=from_cache,
+                         seconds=seconds, peak_host_mb=peak_host_memory_mb()))
+        del data, node_order
+
+    # peak_host_mb is the process's high-water mark so far, so it accumulates
+    # down the rows: the labels row is the label build's own peak.
+    write_csv(pd.DataFrame(rows), prep_path(dataset))
+    print("\nprep record -> "+prep_path(dataset))
+
+
 if __name__ == "__main__":
-    echo_config(__file__, dataset=DATASET, configs=CONFIGS,
+    echo_config(__file__, dataset=DATASET, configs=CONFIGS, prepare_only=PREPARE_ONLY,
                 checkpoint_dir=CHECKPOINT_DIR, epochs=EPOCHS, patience=PATIENCE,
                 results_dir=RESULTS_DIR)
-    main()
+    if PREPARE_ONLY:
+        prepare(DATASET)
+    else:
+        main()

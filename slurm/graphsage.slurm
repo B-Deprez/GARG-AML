@@ -18,6 +18,8 @@
 #          2-fold GraphSAGE run.
 #            t=$(slurm/submit.sh slurm/tree.slurm HI-Small --array=4)
 #            slurm/submit.sh slurm/graphsage.slurm HI-Small --dependency=afterok:$t
+#          For LI-Large also slurm/graphsage_prep.slurm, whose caches keep the
+#          label build off this node (see MEM).
 # RESUMES  Partially. train_fold checkpoints every epoch with a signature check
 #          and resumes from it, so a killed fit restarts mid-fold rather than
 #          from scratch. But the tidy/runs/summary CSVs are written only after
@@ -43,10 +45,16 @@
 #          ~81 MB, node features 515,080 x ~20 float32 = ~41 MB, and the graph is
 #          built from a 475 MB CSV read whole by pandas. The host-side peak is
 #          dominated by that build, not by the tensors. 64g is headroom.
-#          LI-Large: --time=24:00:00 --mem=200g. There edge_index alone is
-#          2 x 176,066,557 x 8 = ~2.8 GB, features 2,054,390 x ~20 x 4 = ~164 MB,
-#          and the 16.7 GB transaction CSV is read whole -- the documented
-#          200 GB envelope, not a measured peak. Its num_workers=4 assumes
+#          LI-Large: run slurm/graphsage_prep.slurm first, then
+#          --time=24:00:00 --mem=120g. 200g cannot be had on this partition:
+#          gpu_a100 allows at most 126,000 MiB and 18 cores per GPU, and sbatch
+#          rejects more. What needed it was the label build -- 166.6 GiB MaxRSS
+#          (label_distribution.py's identical call, job 62206918) -- which the
+#          prep job does on a CPU node. With its caches this job loads
+#          edge_index (at most ~5.6 GB int64, copied once into a tensor), the
+#          features (2,054,390 x ~20 x 4 = ~164 MB) and the folds file; 120g
+#          is headroom over that, not a measured peak. Without the caches it
+#          rebuilds the labels itself and runs out of memory. Its num_workers=4 assumes
 #          pyg-lib is present (see the script's docstring); without it the
 #          neighbour sampler is slower but not heavier.
 # TIME     16:00:00 for HI-Small: the sweep is 4 cut-offs x 3 targets x 5 folds

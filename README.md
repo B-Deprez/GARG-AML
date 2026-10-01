@@ -44,6 +44,10 @@ python scripts/gargaml_undirected.py   # stage 1: block measures -> results/
 python scripts/gargaml_tree.py         # stage 2: train + evaluate -> results/
 ```
 
+On the VSC cluster every experiment has its own Slurm job; see
+[`slurm/README.md`](slurm/README.md) for the submission order, including the
+wave-by-wave procedure for LI-Large.
+
 ### Which script produces which result
 
 | Result | Produced by | Output |

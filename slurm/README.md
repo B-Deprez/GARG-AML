@@ -66,7 +66,8 @@ id splits the sbatch line in two -- `slurm/submit.sh` strips the suffix, a bare
 `sbatch` needs `| cut -d";" -f1`. And a dependency only holds while the job it
 names is still known to the scheduler: once stage 1 has completed and left the
 queue, submitting stage 2 against its id fails with `Job dependency problem`.
-Drop the `--dependency` and gate on the files instead -- see Recovery.
+Drop the `--dependency` and gate on the files instead -- the LI-Large waves
+below do exactly that, and see Recovery.
 
 ```bash
 # --- Stage 1: IBM measures (2 jobs x 1 task each, CPU) ----------------------
@@ -112,21 +113,79 @@ slurm/submit.sh slurm/collect.slurm all \
   --dependency=afterany:$tree:$blk:$ifj:$ts:$gs:$ps:$po1:$po2:$dd
 ```
 
-LI-Large is the documented 16 h / 200 GB job and needs explicit overrides
-(the tree job's `--cpus-per-task=36` is already its default, repeated so the
-line states the whole allocation):
+### LI-Large, submitted in waves
+
+LI-Large is the documented 16 h / 200 GB job and needs explicit overrides (the
+tree job's `--cpus-per-task=36` is already its default, repeated so the line
+states the whole allocation). Submit it **in waves, without `--dependency`**:
+each wave is gated on the files the previous one wrote, not on a job id. That
+way every line stands alone and can be run in its own cell or shell, because
+no job id has to carry over from one line to the next. A chained submission
+fails with `Job dependency problem` as soon as one of those ids is empty or
+has left the queue.
+
+Run from `$VSC_DATA/GARGAML/11.2Code/GARG-AML` after a `git pull`. The pipeline
+reads `data/LI-Large_Trans.csv` and `data/LI-Large_Patterns.txt` whole, under
+exactly those names. The `_0` … `_29` pieces that `src/data/dataprep_vsc.py`
+splits off are read by nothing, so skip that step.
 
 ```bash
-d7=$(slurm/submit.sh slurm/measures_ibm_dir.slurm   LI-Large --array=7 --time=16:00:00 --mem=200g)
-u7=$(slurm/submit.sh slurm/measures_ibm_undir.slurm LI-Large --array=7 --time=16:00:00 --mem=200g)
-slurm/submit.sh slurm/tree.slurm LI-Large --array=7 --cpus-per-task=36 --time=16:00:00 --mem=200g \
-  --dependency=afterok:$d7:$u7
+# --- Before wave 1: is stage 1 already queued? ------------------------------
+# If both measures_ibm_*_LI-Large jobs are listed, do not submit them again --
+# two copies both do the full 16 h of work.
+squeue -M wice -u $USER -o "%.14i %.32j %.9T %.11M"
 
-# label_distribution.slurm needs no stage-1 measures, but LI-Large's own
-# Trans.csv read is the unmeasured cost (see the job's own header) -- give it
-# the same headroom until it's timed.
+# --- Wave 1: now. Stage 1, plus the jobs that read only data/ ---------------
+slurm/submit.sh slurm/measures_ibm_dir.slurm   LI-Large --array=7 --time=16:00:00 --mem=200g
+slurm/submit.sh slurm/measures_ibm_undir.slurm LI-Large --array=7 --time=16:00:00 --mem=200g
+# label_distribution peaked at 166.6 GiB / 38 min (job 62206918); pattern
+# splitting's LI-Large read is still unmeasured -- same headroom until timed.
 slurm/submit.sh slurm/label_distribution.slurm LI-Large --time=16:00:00 --mem=200g
+slurm/submit.sh slurm/pattern_splitting.slurm  LI-Large --time=16:00:00 --mem=200g
+# GraphSAGE's labels, structure and features, built on a CPU node: the label
+# build alone exceeds what a gpu_a100 job may request (126,000 MiB per GPU).
+slurm/submit.sh slurm/graphsage_prep.slurm     LI-Large --time=06:00:00 --mem=200g
+
+# --- Wave 2: once BOTH measure files exist ----------------------------------
+ls -lh results-revision/LI-Large_GARGAML_*.csv
+slurm/submit.sh slurm/tree.slurm LI-Large --array=7 --cpus-per-task=36 --time=16:00:00 --mem=200g
+
+# --- Wave 3: once the fold partition exists ---------------------------------
+# The tree job writes it after its first data preparation, long before it
+# finishes, so these two can run alongside the tree fits. GraphSAGE also
+# needs all four caches from graphsage_prep (prep.csv is written last):
+# without them it rebuilds the labels on the GPU node and runs out of memory.
+ls -lh results-revision/LI-Large_folds.csv results-revision/LI-Large_graphsage_*
+slurm/submit.sh slurm/graphsage.slurm LI-Large --time=24:00:00 --mem=120g
+sbatch --time=16:00:00 --mem=200g slurm/distribution_scores.slurm
+
+# --- Wave 4: once squeue shows nothing left for LI-Large --------------------
+# LI-Large_directed_all_metrics.csv is the tree job's last section; until it
+# is listed, the tree job has not finished.
+ls results-revision/LI-Large_*metrics.csv
+slurm/submit.sh slurm/collect.slurm all
 ```
+
+- **The wave-2 gate is the one that matters.** A tree job that starts before a
+  measure file exists skips that direction and still exits 0.
+- **GraphSAGE's preprocessing time is a cache load on LI-Large.** The GPU job
+  reads what `graphsage_prep` built, so the `preprocess_seconds` it reports
+  is flagged `preprocess_from_cache = 1`. The cold build times are in
+  `LI-Large_graphsage_prep.csv`; use those for any runtime comparison.
+- **Stage 1 skips a dataset whose measures CSV already exists** in
+  `results-revision/`. Put `GARGAML_FORCE=1` in front of the two wave-1 lines
+  to recompute it.
+- **A 16 h kill loses a whole direction.** Stage 1 resumes per file, not per
+  node. The 16 h is the budget the paper states, not a measured runtime, so if
+  the limit is hit, resubmit with a longer `--time`.
+- **`distribution_scores.slurm` always runs HI-Small and LI-Large both** (its
+  dataset list sits inside `if __name__`). Wave 3 therefore also rewrites
+  HI-Small's base-score metrics, using whichever `HI-Small_folds.csv` is in
+  `results-revision/` at that point.
+- **Not in this run.** `tree_blocks.slurm` is redundant here, because
+  `tree.slurm` already runs the `blocks` config. `if.slurm` would need an edit,
+  since `gargaml_IF.py` hardcodes `dataset = "HI-Small"` in `main()`.
+  `LI-Large_nolouvain` (index 9) is expected to be infeasible; see Known gaps.
 
 ---
 
@@ -136,6 +195,7 @@ slurm/submit.sh slurm/label_distribution.slurm LI-Large --time=16:00:00 --mem=20
 data/  ──┬─► measures_ibm_{dir,undir}   ──┬─► tree ──► graphsage   (folds.csv)
          │   (per dataset NAME)           ├─► tree_blocks
          │                                └─► if
+         ├─► graphsage_prep ───────────────────► graphsage   (caches; LI-Large)
          ├─► measures_synth_{dir,undir} ────► tree_synth           (see gap below)
          ├─► pattern_splitting          ─┐
          ├─► partial_obs                 ├──► collect  (afterany)
