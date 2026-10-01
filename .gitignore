@@ -49,6 +49,10 @@ notebooks/*.png
 # Early reference implementation, superseded by src/ — not part of the pipeline.
 initial_code.py
 
+# Local archive in the repo root (~410 MB) -- not source, and far too large
+# for git.
+/Archief.zip
+
 # --- Personal / internal notes ----------------------------------------------
 # Submission/reviewer notes etc. — not code, not needed for reproducibility,
 # and not meant to be public. They name reviewers, editors and journal
