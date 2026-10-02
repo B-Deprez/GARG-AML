@@ -44,11 +44,16 @@
 
 #SBATCH --mail-user bruno.deprez@kuleuven.be
 
-cd $VSC_DATA/GARGAML/11.2Code/GARG-AML
+cd $VSC_DATA/GARGAML/11.2Code/GARG-AML || exit 1
 
 export PATH="${VSC_DATA}/miniconda3/bin:${PATH}"
 
 source activate gargaml
+# Fail fast from here on, so a crash ends the job as FAILED (FAIL mail) rather
+# than COMPLETED via the closing echo. Set after activation, which is not -e
+# safe; the activation is checked explicitly instead.
+[ "${CONDA_DEFAULT_ENV:-}" = "gargaml" ] || { echo "ERROR: conda env gargaml did not activate" >&2; exit 1; }
+set -eo pipefail
 
 source slurm/common.sh
 resolve_synth_index

@@ -341,8 +341,17 @@ timing file per task under `results/timing/`, with job id, host, worker count an
 timestamp; `collect.slurm` concatenates them into `results/timing_all.csv`. The
 legacy files are still appended to, so `VisualisationRunTime.ipynb` is unaffected.
 
-**Not added, deliberately — tell me if you want them.** `set -euo pipefail` is
-absent (without it a failed `source activate` still runs `python` and the job
-reports success; with it a harmless nonzero return from `activate` aborts the
-job). `export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK` is present but commented out
-in `common.sh`. No disk-staging variant exists — it assumes `data/` is populated.
+**Fail-fast, so the mail tells the truth.** Every job runs `set -eo pipefail`
+right after `source activate gargaml`. Before this, the closing `echo Finished`
+set the job's exit code, so a `ModuleNotFoundError` or `FileNotFoundError` seconds
+in still showed up as COMPLETED / ExitCode 0. Now the first failing command ends
+the job as FAILED and the FAIL mail is sent. It is turned on *after* activation
+because conda's activate scripts are not written for `-e`; the activation is
+checked explicitly instead, against `CONDA_DEFAULT_ENV`. `-u` is left off for the
+same reason. A Python script that decides to skip and returns normally still
+exits 0 — for example `gargaml_tree.py` when no measures CSV exists for the
+dataset, or a measure script whose output is already on disk.
+
+**Not added, deliberately — tell me if you want them.**
+`export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK` is present but commented out in
+`common.sh`. No disk-staging variant exists — it assumes `data/` is populated.
