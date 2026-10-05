@@ -86,9 +86,9 @@ su2=$(sbatch --parsable --array=22-43 --time=02:00:00 --mem=16g slurm/measures_s
 
 # --- Stage 2: models (CPU) --------------------------------------------------
 tree=$(slurm/submit.sh slurm/tree.slurm HI-Small --array=4 --dependency=afterok:$dir:$und)
-# tree_blocks.slurm and if.slurm hardcode their dataset in the Python script
-# (main()), so submit them directly with sbatch, not through submit.sh.
-blk=$(sbatch --parsable --dependency=afterok:$dir:$und slurm/tree_blocks.slurm | cut -d";" -f1)
+blk=$(slurm/submit.sh slurm/tree_blocks.slurm HI-Small --dependency=afterok:$tree)
+# if.slurm hardcodes its dataset in the Python script (main()), so submit it
+# directly with sbatch, not through submit.sh.
 ifj=$(sbatch --parsable --dependency=afterok:$dir:$und slurm/if.slurm | cut -d";" -f1)
 # One job per (variant, direction) -- the argument has no default direction.
 # VisualisationResults.ipynb reads the 3 and 5 variants; $ts joins the four ids.

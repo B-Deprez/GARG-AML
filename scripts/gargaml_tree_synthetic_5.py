@@ -64,6 +64,15 @@ def data_preparation(dataset, gargaml_columns, directed, score_type):
 
     for column in gargaml_columns:
         results_df[column] = summary_gargaml[column]
+    return merge_labels(results_df, dataset)
+
+def merge_labels(results_df, dataset):
+    """The node labels joined onto a score frame, in the row order the split sees.
+
+    Shared with scripts/distribution_scores.py, which builds the base score's
+    frame through it so that :func:`holdout_test_index` hands back the same
+    test rows there as here.
+    """
     path = 'data/label_data_'+dataset+'.csv'
     labels_df = pd.read_csv(path)
     labels_df.reset_index(inplace=True)
@@ -80,6 +89,16 @@ def data_split(results_df, gargaml_columns, target, test_size=0.3, seed=SEED):
     X_train, X_test, y_train, y_test = holdout_split(X_df, y, test_size=test_size, seed=seed)
 
     return X_train, X_test, y_train, y_test
+
+def holdout_test_index(results_df, target, test_size=0.3, seed=SEED):
+    """Row labels :func:`data_split` puts in the test set for ``target``.
+
+    The split depends on the label column and the row order only, not on the
+    features, so the base score can be scored on exactly the rows the tree
+    models are tested on.
+    """
+    _, X_test, _, _ = data_split(results_df, [target], target, test_size=test_size, seed=seed)
+    return X_test.index
 
 GARGAML_COLUMNS = [
     "GARGAML", 

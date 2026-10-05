@@ -57,13 +57,13 @@ wave-by-wave procedure for LI-Large.
 | Tree / boosting results on the IBM data | `scripts/gargaml_tree.py` | `results/<dataset>_<direction>_metrics.csv` (tidy) and `results/<dataset>_<metric>_<model>_<direction>_combined.csv` |
 | Feature-group ablations (blocks, topology, all) | `scripts/gargaml_tree.py`, `scripts/gargaml_tree_blocks.py` | the same files with a `_blocks` / `_topology` / `_all` suffix; the published model is the suffix-less `full` config |
 | Tree / boosting results on the synthetic grid | `scripts/gargaml_tree_synthetic{,_3,_5}.py` (`GARGAML_DIRECTED=1` for the directed measures) | `results/synthetic_tree_<directed>_{full,3,5}.csv`; the copies at the repository root are the published run's, from before the evaluation module |
-| Base GARG-AML score metrics, synthetic grid | `scripts/distribution_scores.py` with `GARGAML_DATASET=synthetic` | `results/synthetic_score_<direction>_supervised.csv`, same layout as the tree files (replaces `results_performance_<direction>_supervised.txt`) |
+| Base GARG-AML score metrics, synthetic grid | `scripts/distribution_scores.py` with `GARGAML_DATASET=synthetic` | `results/synthetic_score_<direction>_supervised.csv`, same layout as the tree files (replaces `results_performance_<direction>_supervised.txt`). Its `score` cell is computed on the tree models' 30% test rows for each label, so the two are ranked over the same nodes; `score_full` keeps the every-node value the published tables used |
 | Isolation-forest baseline | `scripts/gargaml_IF.py` | `results/<dataset>_<direction>_if_metrics.csv` and `results/<dataset>_<metric>_isolationforest_<direction>_if_combined.csv` |
 | GraphSAGE baseline, both feature configs | `scripts/graphsage_baseline.py` | `results/<dataset>_undirected_graphsage[_attr]_metrics.csv`, the matching `_combined.csv` matrices, plus `results/<dataset>_graphsage_runs.csv` (one row per run, with timings) and `_graphsage_summary.csv` (mean/std over folds) |
 | Score distributions, histograms and lift curves | `scripts/distribution_scores.py`, `notebooks/DistributionScores.ipynb` | `results/<dataset>_GARGAML_<direction>_*histogram.pdf`, `*_lift.pdf` |
 | Base GARG-AML score metrics, per fold and pooled | `scripts/distribution_scores.py` | `results/<dataset>_<direction>_base_metrics.csv` (tidy; the full-population row keeps `fold = NaN` and is the number in `results/results_performance_IBM_<direction>.txt`, unchanged) |
 | Label-percentage tables (Tables 7-8), including the 0.0 cut-off | `scripts/label_distribution.py`, `notebooks/DistributionScores.ipynb` | `results/<dataset>_imbalance_<direction>_combined.csv` (identical under both direction tokens; computed straight from the label construction, no GARG-AML score, Louvain reduction or model fit needed) |
-| Performance tables and figures | `notebooks/VisualisationResults.ipynb` | `results/<dataset>_AUC-ROC_AUC-PR.pdf`, LaTeX tables |
+| Performance tables and figures | `notebooks/VisualisationResults.ipynb` (IBM part reads the tidy `*_metrics.csv` files in `results-revision/`, one row type for every model -- `IBM_FOLD_MODE`) | `results-revision/<dataset>_AUC-ROC_AUC-PR.pdf`, LaTeX tables |
 | Critical-difference diagrams (Figs. 10-11) | `notebooks/VisualisationResults.ipynb` | `results/CD_ROC_full.pdf`, `results/CD_PR_full.pdf` |
 | Friedman &chi;&sup2; / p-values, multiple-testing control, Nemenyi matrices | `notebooks/VisualisationResults.ipynb` | `results/friedman_results.csv` (per metric and pattern: &chi;&sup2;, df, raw *p*, Bonferroni- and Holm-adjusted *p*, the Nemenyi critical difference) and `results/nemenyi_pvalues_<metric>_<pattern>.csv` |
 | Runtime / scalability comparison (Fig. 6) | `notebooks/VisualisationRunTime.ipynb` | `results/time_boxplot_norm.pdf` |
@@ -80,8 +80,9 @@ wave-by-wave procedure for LI-Large.
 | Tree / boosting / GraphSAGE under a bank view | the model scripts above, run on a view name | the same files, under `results/<dataset>_bank<b>_*` |
 
 FlowScope and AutoAudit are not run from this repository (see *Experimental
-Evaluation* above); `VisualisationResults.ipynb` reads their exported results
-from `results-0/` and `results-aa/`.
+Evaluation* above); `VisualisationResults.ipynb` reads their synthetic results
+from `results-0/` and `results-aa/`, and FlowScope's IBM tidy metrics from
+`results-revision/` (falling back to `results/`).
 
 ### Experimental settings
 

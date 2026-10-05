@@ -36,6 +36,7 @@ columns without materialising a NetworkX graph, which is what makes LI-Large
 pipeline by construction. Both produce the same node set and edge count.
 """
 
+import hashlib
 import os
 import resource
 import sys
@@ -528,6 +529,28 @@ def validation_split(y, train_mask, val_fraction=0.1, seed=SEED):
     return fit_mask, val_mask
 
 
+def run_fingerprint(train_mask, y, x):
+    """Digest of what one fold is trained on: the training fold, the labels
+    and the node features.
+
+    Part of :func:`train_fold`'s resume signature. A checkpoint is named by
+    dataset, config, cut-off, target and fold *index* only, so without this a
+    checkpoint left by another partition -- a 2-fold test run, an earlier
+    label build -- would be resumed by a 5-fold run whose test fold it was
+    partly trained on, leaking test labels into the reported metrics.
+    """
+    digest = hashlib.sha256()
+    train_mask = np.asarray(train_mask, dtype=bool)
+    labels = np.asarray(y) > 0
+    features = x.detach().cpu().contiguous().numpy()
+    digest.update(repr((train_mask.shape, labels.shape, features.shape,
+                        str(features.dtype))).encode())
+    digest.update(np.packbits(train_mask).tobytes())
+    digest.update(np.packbits(labels).tobytes())
+    digest.update(features.tobytes())
+    return digest.hexdigest()
+
+
 def train_fold(data, train_mask, y, device, epochs=50, patience=5, hidden_channels=64,
                dropout=0.2, lr=1e-3, batch_size=1024, num_neighbors=(25, 10),
                val_fraction=0.1, seed=SEED, num_workers=0, checkpoint_path=None,
@@ -576,11 +599,13 @@ def train_fold(data, train_mask, y, device, epochs=50, patience=5, hidden_channe
     criterion = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight)
 
     # What a checkpoint must agree with to be resumable: a checkpoint left by
-    # a run under different settings is otherwise resumed silently, and the
-    # run reports epochs it never trained under the settings it claims.
+    # a run under different settings, or on a different fold, labels or
+    # features (run_fingerprint), is otherwise resumed silently, and the run
+    # reports epochs it never trained under the settings it claims.
     signature = {"in_channels": data.num_node_features, "hidden_channels": hidden_channels,
                  "dropout": dropout, "lr": lr, "batch_size": batch_size,
-                 "num_neighbors": tuple(num_neighbors), "seed": seed}
+                 "num_neighbors": tuple(num_neighbors), "seed": seed,
+                 "fingerprint": run_fingerprint(train_mask, y, data.x)}
 
     start_epoch, best_ap, best_epoch, best_state, stale = 0, -np.inf, -1, None, 0
 
@@ -589,7 +614,8 @@ def train_fold(data, train_mask, y, device, epochs=50, patience=5, hidden_channe
         if checkpoint.get("signature") != signature:
             if verbose:
                 print("    ignoring "+checkpoint_path+": trained under different "
-                      "settings, starting fresh")
+                      "settings or on a different fold, labels or features, "
+                      "starting fresh")
         else:
             model.load_state_dict(checkpoint["model_state"])
             optimizer.load_state_dict(checkpoint["optimizer_state"])

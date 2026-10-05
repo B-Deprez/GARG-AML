@@ -4,7 +4,8 @@
 # WHAT     A thin entry point onto gargaml_tree.py's shared path with
 #          CONFIG = "blocks": the block densities and sizes on their own,
 #          without the GARG-AML score.
-# SUBMIT   sbatch slurm/tree_blocks.slurm
+# SUBMIT   slurm/submit.sh slurm/tree_blocks.slurm HI-Small
+#          sbatch slurm/tree_blocks.slurm [<dataset>]   (HI-Small when omitted)
 # ARRAY    None.
 # PREREQ   The same stage-1 measures as slurm/tree.slurm, same dataset name.
 # RESUMES  Per section, as in tree.slurm: each of its two sections (blocks,
@@ -25,10 +26,11 @@
 #          transaction CSV (unmeasured). Replace with the per-section "fitted
 #          <n> splits" log lines from the first run.
 #
-# NOTE     gargaml_tree_blocks.py holds its dataset choice inside main(), not
-#          at module scope, so there is no env var to select a dataset here.
-#          Edit the script's own `dataset = "HI-Small"` constant to run a
-#          different one.
+# NOTE     The dataset is the optional first argument (or GARGAML_DATASET),
+#          HI-Small by default. The job reads the fold partition tree.slurm
+#          wrote for that dataset and fails if its fold count differs from
+#          GARGAML_N_FOLDS, so the blocks results stay paired with the other
+#          configs; with no partition on disk it writes one.
 
 #SBATCH --job-name=gargaml_tree_blocks
 #SBATCH --output=slurm/logs/gargaml_tree_blocks.out
@@ -56,9 +58,11 @@ source activate gargaml
 [ "${CONDA_DEFAULT_ENV:-}" = "gargaml" ] || { echo "ERROR: conda env gargaml did not activate" >&2; exit 1; }
 set -eo pipefail
 
+source slurm/common.sh
+resolve_dataset "${1:-${GARGAML_DATASET:-HI-Small}}"
 export GARGAML_RESULTS_DIR="${GARGAML_RESULTS_DIR:-results-revision}"
 
-echo "[$(date)] tree_blocks: running scripts/gargaml_tree_blocks.py's own dataset constant, config=blocks results_dir=$GARGAML_RESULTS_DIR"
+echo "[$(date)] tree_blocks: dataset=$GARGAML_DATASET config=blocks n_folds=${GARGAML_N_FOLDS:-default(5)} results_dir=$GARGAML_RESULTS_DIR"
 
 python -u scripts/gargaml_tree_blocks.py
 

@@ -7,6 +7,7 @@ sys.path.append(DIR)
 
 from src.data.pattern_construction import define_ML_labels, summarise_ML_labels
 from src.methods.gargaml_scores import define_gargaml_scores
+from scripts.gargaml_tree_synthetic import holdout_test_index, merge_labels
 from src.utils.evaluation import (CUT_OFFS, LEGACY_METRICS, SEED,
                                   evaluate_scores, fold_assignments, folds_path,
                                   metric_names, metric_records, nan_metrics,
@@ -380,25 +381,38 @@ def plot_lift_synthetic(laundering_combined, columns, str_directed, str_supervis
     plt.close()
 
 
+def _score_metrics(frame, column):
+    """Base-score metrics for one label over the rows of ``frame``."""
+    try:
+        # No natural 0/1 prediction for a raw score -- see
+        # distribution_scores_IBM -- so Precision and F1 come back NaN
+        # (written -1) rather than invented at some threshold.
+        return evaluate_scores((frame[column]*1).values, frame["GARGAML"].values)
+    except Exception as exc:
+        print("    skipped: "+repr(exc))
+        return nan_metrics()
+
 def distribution_scores_synthetic(dataset, results_df, str_directed, str_supervised):
     """Base-score metrics on one synthetic dataset, un-folded.
 
     Cross-validation is scoped to the IBM data: the 66 synthetic datasets
-    keep the single split, and their variance comes from the 66-dataset
-    spread that feeds the Friedman/Nemenyi analysis, so evaluation here is
-    over the full population.
+    keep the single 70/30 split, and their variance comes from the
+    66-dataset spread that feeds the Friedman/Nemenyi analysis.
 
-    That population is not the tree models' 30% test split, and P@K is
-    sensitive to it: an injected pattern labels ~31 nodes (median), so the
-    full population can fill a top 10 that the tree split, holding ~9 of
-    them, cannot. Compare R@K or AUC-PR across the two, not P@K alone.
+    ``"score"`` is computed on the tree models' 30% test rows for each label
+    (gargaml_tree_synthetic.py's :func:`holdout_test_index`), so the base
+    score and the trees are ranked over the same nodes. That matters for the
+    fixed-K metrics: an injected pattern labels ~31 nodes (median), the test
+    rows hold ~9 of them, so P@10 and R@10 over every node are a different
+    quantity -- R@10 is capped near 0.32 there and not on the test rows.
+    ``"score_full"`` keeps the every-node figure the published tables used.
 
-    Returns ``{pattern: {"score": cell}}``, the tree scripts' cell layout.
+    Returns ``{pattern: {"score": cell, "score_full": cell}}``, the tree
+    scripts' cell layout.
     """
     columns = ['laundering', 'separate', 'new_mules', 'existing_mules']
-    label_data = pd.read_csv("data/label_data_"+dataset+".csv")
-    laundering_combined = results_df.merge(label_data, left_index=True, right_index=True, how="outer")
-    laundering_combined.fillna(-1, inplace=True) # Nodes without connections are not smurfing
+    # Nodes without connections are not smurfing (fillna(-1) in merge_labels).
+    laundering_combined = merge_labels(results_df, dataset)
 
     plot_distribution_synthetic(laundering_combined, columns, str_directed, str_supervised)
 
@@ -408,21 +422,14 @@ def distribution_scores_synthetic(dataset, results_df, str_directed, str_supervi
     results = dict()
     for column in columns:
         print(column)
-        y_true = laundering_combined[column].values
-        y_pred = laundering_combined["GARGAML"].values
+        test_rows = holdout_test_index(laundering_combined, column)
+        metrics = _score_metrics(laundering_combined.loc[test_rows], column)
+        metrics_full = _score_metrics(laundering_combined, column)
 
-        try:
-            # No natural 0/1 prediction for a raw score -- see
-            # distribution_scores_IBM -- so Precision and F1 come back NaN
-            # (written -1) rather than invented at some threshold.
-            metrics = evaluate_scores(y_true, y_pred)
-        except Exception as exc:
-            print("    skipped: "+repr(exc))
-            metrics = nan_metrics()
-
-        results[column] = {"score": _synthetic_cell(metrics)}
+        results[column] = {"score": _synthetic_cell(metrics),
+                           "score_full": _synthetic_cell(metrics_full)}
         for name in LEGACY_METRICS + ["P@10"]:
-            print(name+": ", metrics[name])
+            print(name+": ", metrics[name], "(every node: "+str(metrics_full[name])+")")
 
     return results
 
