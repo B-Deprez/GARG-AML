@@ -130,7 +130,9 @@ def _structure_from_pandas(path, banks=None):
     # would give, without building the intermediate object.
     pairs = np.unique(np.stack([np.minimum(source, target),
                                 np.maximum(source, target)], axis=1), axis=0)
-    edge_index = np.concatenate([pairs, pairs[:, ::-1]], axis=0).T
+    # .T alone is a Fortran-ordered view, whose rows pyg-lib's index_sort
+    # rejects as non-contiguous; copy to row-major so the cache is written so.
+    edge_index = np.ascontiguousarray(np.concatenate([pairs, pairs[:, ::-1]], axis=0).T)
 
     return edge_index, list(accounts)
 
@@ -406,8 +408,14 @@ def build_graph_data(dataset, config="topology", results_dir="results",
     x = build_features(dataset, node_order, degree, config,
                        results_dir=results_dir, cache=cache)
 
+    # torch.tensor keeps a numpy array's strides, and structure caches written
+    # before the row-major fix in _structure_from_pandas hold a transposed
+    # view. NeighborLoader then hands a strided edge_index[1] to pyg-lib's
+    # index_sort, which fails with "Input should be contiguous" -- only where
+    # pyg-lib is installed, since PyG otherwise falls back to torch.sort.
     data = Data(x=torch.tensor(x, dtype=torch.float),
-                edge_index=torch.tensor(edge_index, dtype=edge_dtype))
+                edge_index=torch.as_tensor(np.ascontiguousarray(edge_index), dtype=edge_dtype))
+    assert data.edge_index.is_contiguous(), "edge_index must be contiguous for pyg-lib"
 
     return data, node_order, time.perf_counter() - started
 
