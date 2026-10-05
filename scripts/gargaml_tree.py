@@ -32,6 +32,7 @@ from src.utils.evaluation import (
     metric_records,
     model_scores,
     nan_metrics,
+    single_class_reason,
     write_folds,
     write_metrics,
 )
@@ -487,6 +488,22 @@ def run_config(laundering_combined, dataset, directed, config, seed=SEED,
             # on the labels alone -- X contributes nothing beyond its length --
             # so it raises exactly what the worker's split would.
             y = (laundering_combined[target] > cutoff).astype(int)
+
+            # A one-class label is settled before any split: neither splitter
+            # rejects it, and a decision tree fits it, so the cell would be
+            # written "ok" with AUC-PR 0.0 off zero positives (boosting raises
+            # and was skipped). See single_class_reason.
+            reason = single_class_reason(y)
+            if reason is not None:
+                status = "skipped: "+reason
+                fold_ctx = {} if N_FOLDS == 0 else dict(fold = np.nan)
+                counts = dict(n_test = len(y), n_pos = int(y.sum()))
+                cell.update(kind = "unsplittable", log = "    "+status, records = metric_records(
+                    {"imbalance": y.mean()}, status = status, model = "", **counts, **fold_ctx, **context))
+                for model_key, _ in models:
+                    cell["records"] += metric_records(nan_metrics(), status = status, model = model_key,
+                                                      **counts, **fold_ctx, **context)
+                continue
 
             if N_FOLDS == 0: # single 70/30 stratified holdout
                 try:

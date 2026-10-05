@@ -148,6 +148,29 @@ def holdout_split(X, y, test_size=0.3, seed=SEED):
     )
 
 
+# The single_class_reason that occurs in practice, and the status reason a
+# reporting layer stamps on a no-positive row it masks (mask_no_positives).
+NO_POSITIVES = "no positive labels"
+
+
+def single_class_reason(y):
+    """Why the binary label ``y`` cannot be evaluated at all, or ``None``.
+
+    ``"no positive labels"`` / ``"no negative labels"`` when ``y`` holds one
+    class only. Neither splitter rejects that -- ``StratifiedKFold`` and a
+    stratified ``train_test_split`` both stratify on a single class without
+    complaint -- and a decision tree fits a one-class model on it, so without
+    this check such a cell is written ``ok`` with AUC-PR and P@K of 0.0 off
+    zero positives.
+    """
+    n_pos = int(np.sum(np.asarray(y)))
+    if n_pos == 0:
+        return NO_POSITIVES
+    if n_pos == len(y):
+        return "no negative labels"
+    return None
+
+
 def cv_splits(X, y, n_splits=CV_FOLDS, seed=SEED):
     """5-fold (default) stratified CV splits, disjoint and exhaustive over ``y``.
 
@@ -155,13 +178,18 @@ def cv_splits(X, y, n_splits=CV_FOLDS, seed=SEED):
     generator, so a too-small class raises at the call site the way
     ``holdout_split``'s stratification failure does. The minimum class count
     is checked explicitly rather than left to ``StratifiedKFold``, which in
-    some sklearn versions only warns and returns folds with a class missing.
+    some sklearn versions only warns and returns folds with a class missing,
+    and an absent class counts as zero members (:func:`single_class_reason`).
 
     The ``n_splits`` test sets are disjoint and partition ``y`` exactly once
     each, which is the property a variance estimate needs and repeated random
     splits, whose test sets overlap by design, do not have. ``seed`` is the
     ``StratifiedKFold`` shuffle seed, so the partition is reproducible.
     """
+    reason = single_class_reason(y)
+    if reason is not None:
+        raise ValueError(f"y has {reason}; cannot stratify into folds.")
+
     _, counts = np.unique(np.asarray(y), return_counts=True)
     if counts.min() < n_splits:
         raise ValueError(
@@ -472,6 +500,36 @@ def label_imbalance_records(dataset, path_trans=None, path_patterns=None, banks=
     return records
 
 
+def no_positive_rows(long_df):
+    """Boolean mask of model rows that were scored against zero positives.
+
+    Such a row has no meaningful value whatever its ``status``: AUC-PR,
+    precision and P@K come out as 0.0 and AUC-ROC as NaN. Result files
+    written before gargaml_tree.py checked :func:`single_class_reason`
+    carry them as ``status == "ok"`` -- LI-Large's decision tree at the 0.5
+    and 0.9 cut-offs. The cell-level ``imbalance`` rows (empty ``model``)
+    are excluded: a prevalence of 0.0 is a true value, not a gap.
+    """
+    model = long_df["model"]
+    return model.notna() & (model != "") & (long_df["n_pos"] == 0)
+
+
+def mask_no_positives(long_df):
+    """``long_df`` with every :func:`no_positive_rows` row turned into a gap.
+
+    Value NaN, status ``"skipped: no positive labels"``, so the row reads
+    exactly like a cell the fit path skipped. Returns the frame unchanged
+    (not a copy) when there is nothing to mask.
+    """
+    mask = no_positive_rows(long_df)
+    if not mask.any():
+        return long_df
+    long_df = long_df.copy()
+    long_df.loc[mask, "value"] = np.nan
+    long_df.loc[mask, "status"] = "skipped: " + NO_POSITIVES
+    return long_df
+
+
 def metrics_frame(records):
     """Tidy DataFrame from the record list, with a stable column order.
 
@@ -515,7 +573,9 @@ def write_metric_matrices(long_df, dataset, str_directed, suffix="",
     Emits ``<dataset>_<metric>_<model>_<direction><suffix>_combined.csv`` for
     each of :data:`LEGACY_METRICS` and each model, plus the model-independent
     ``<dataset>_imbalance_<direction><suffix>_combined.csv``. A cell the
-    models could not be fitted on stays a NaN gap.
+    models could not be fitted on stays a NaN gap, and so does a cell
+    scored against zero positives whatever its status
+    (:func:`mask_no_positives`), rather than a 0.0 no model earned.
 
     Pooled out-of-fold rows (``fold == -1``) are always excluded before
     pivoting: averaging them in with the per-fold rows would mix a sixth,
@@ -524,6 +584,7 @@ def write_metric_matrices(long_df, dataset, str_directed, suffix="",
     ``write_std=True`` also writes ``..._std_combined.csv`` companions with
     ``aggfunc="std"``, same shape, so figures can gain error bars.
     """
+    long_df = mask_no_positives(long_df)
     if "fold" in long_df.columns:
         long_df = long_df[long_df["fold"] != -1]
 

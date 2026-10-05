@@ -38,6 +38,14 @@ A cell whose models could not be fitted carries ``status`` starting with
 rather than dropping the row, and a mean over fewer folds than expected is
 marked so a reader cannot mistake it for a complete one. :func:`coverage`
 reports what is on disk before any table is built.
+
+A model row scored against **zero positives** is a gap too, whatever its
+``status`` says. Files written before ``gargaml_tree.py`` checked for a
+one-class label hold such rows as ``ok`` with AUC-PR 0.0 (LI-Large's decision
+tree at 0.5 / 0.9), which would render as ``0.0`` and could be bolded as the
+best in a row of ``--``. :func:`load_metrics` and :func:`summarise` both apply
+:func:`~src.utils.evaluation.mask_no_positives`, so those files tabulate
+correctly without a re-run.
 """
 
 from __future__ import annotations
@@ -50,7 +58,8 @@ import warnings
 import numpy as np
 import pandas as pd
 
-from src.utils.evaluation import ALERT_SIZES, HEADLINE_CUTOFFS, LEGACY_METRICS
+from src.utils.evaluation import (ALERT_SIZES, HEADLINE_CUTOFFS, LEGACY_METRICS,
+                                  mask_no_positives)
 from src.utils.features import is_direction_free
 from src.utils.graph_processing import (DEFAULT_RESOLUTION, HUBS_SEPARATOR,
                                         parse_hubs, parse_resolution, setting_label)
@@ -140,6 +149,10 @@ def load_metrics(results_dir="results", datasets=None):
     read -- a file whose contents disagree with its name would be visible
     rather than silently relabelled. ``source`` records where each row came
     from, which is what makes a surprising number traceable.
+
+    Zero-positive model rows come back as gaps (value NaN, status
+    ``skipped: no positive labels``), so :func:`coverage` does not count
+    them as ``ok``; see the module docstring.
     """
     frames = []
     for path, _, _, suffix in metric_files(results_dir, datasets):
@@ -155,7 +168,7 @@ def load_metrics(results_dir="results", datasets=None):
                                      "cutoff", "target", "seed", "fold", "metric",
                                      "K", "value", "n_test", "n_pos", "status",
                                      "suffix", "source"])
-    return pd.concat(frames, ignore_index=True)
+    return mask_no_positives(pd.concat(frames, ignore_index=True))
 
 
 def model_rows(df):
@@ -233,9 +246,14 @@ def summarise(df, fold_mode="auto", group_keys=GROUP_KEYS):
 
     ``n_folds_ok`` counts folds whose ``status`` is ``"ok"``, not folds
     present, so a mean over 3 of 5 folds announces itself.
+
+    Zero-positive model rows are masked to gaps first, as in
+    :func:`load_metrics`, for a frame that did not come through it.
     """
     if df.empty:
         return df.assign(mean=[], std=[], n_folds_ok=[])
+
+    df = mask_no_positives(df)
 
     per_fold = df[df["fold"] >= 0]
     pooled = df[df["fold"] == -1]
