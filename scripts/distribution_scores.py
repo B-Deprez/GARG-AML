@@ -381,13 +381,24 @@ def plot_lift_synthetic(laundering_combined, columns, str_directed, str_supervis
     plt.close()
 
 
+# The rule behind the synthetic base score's Precision and F1: flag a node when
+# its score is above this. A raw score has no 0/1 prediction of its own, so
+# this is a stated cut, not something the model predicts -- the table labels it
+# as such. 0.5 is the cut the published synthetic table used (it reproduces
+# every published Precision/F1 of the two score rows to three decimals).
+# Threshold-free metrics (AUC, P@K) do not depend on it.
+SCORE_THRESHOLD = 0.5
+
 def _score_metrics(frame, column):
-    """Base-score metrics for one label over the rows of ``frame``."""
+    """Base-score metrics for one label over the rows of ``frame``.
+
+    Precision and F1 use the ``GARGAML > SCORE_THRESHOLD`` rule; the IBM path
+    (:func:`distribution_scores_IBM`) still reports them as NaN.
+    """
     try:
-        # No natural 0/1 prediction for a raw score -- see
-        # distribution_scores_IBM -- so Precision and F1 come back NaN
-        # (written -1) rather than invented at some threshold.
-        return evaluate_scores((frame[column]*1).values, frame["GARGAML"].values)
+        score = frame["GARGAML"].values
+        return evaluate_scores((frame[column]*1).values, score,
+                               y_pred=(score > SCORE_THRESHOLD).astype(int))
     except Exception as exc:
         print("    skipped: "+repr(exc))
         return nan_metrics()
