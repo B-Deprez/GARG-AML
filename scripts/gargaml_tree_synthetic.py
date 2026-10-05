@@ -15,7 +15,8 @@ from src.methods.gargaml_scores import define_gargaml_scores, summarise_gargaml_
 from src.data.graph_construction import construct_synthetic_graph
 from src.utils.graph_processing import graph_community
 from src.utils.evaluation import SEED, evaluate_model, holdout_split, metric_names
-from src.utils.runtime import resolve_results_dir
+from src.utils.runtime import (as_bool, echo_config, env_override,
+                               resolve_results_dir, write_csv)
 
 from sklearn import tree
 from sklearn import ensemble
@@ -80,19 +81,18 @@ def data_split(results_df, gargaml_columns, target, test_size=0.3, seed=SEED):
 
     return X_train, X_test, y_train, y_test
 
-def train_pipeline(string_name, pattern, tree_model, directed):
-    gargaml_columns = [
-        "GARGAML", 
-        "GARGAML_min", "GARGAML_max", "GARGAML_mean", "GARGAML_std",
-        "degree", "degree_min", "degree_max", "degree_mean", "degree_std"
-        ]
-    
+GARGAML_COLUMNS = [
+    "GARGAML", 
+    "GARGAML_min", "GARGAML_max", "GARGAML_mean", "GARGAML_std",
+    "degree", "degree_min", "degree_max", "degree_mean", "degree_std"
+    ]
+
+def train_pipeline(data_tree, string_name, pattern, tree_model):
     print("====================================")
     print(string_name)
     print(pattern)
     print(tree_model)
-    data_tree = data_preparation(string_name, gargaml_columns, directed, score_type='weighted_average')
-    X_train, X_test, y_train, y_test = data_split(data_tree, gargaml_columns, target=pattern, test_size=0.3)
+    X_train, X_test, y_train, y_test = data_split(data_tree, GARGAML_COLUMNS, target=pattern, test_size=0.3)
 
     if tree_model == 'tree':
         clf = tree.DecisionTreeClassifier(min_samples_leaf=10, random_state=1997)
@@ -116,12 +116,24 @@ def gargaml_tree_synthetic(string_name, directed):
         'tree',
         'boosting'
     ]
+    # Prepared once per dataset rather than once per (pattern, model): none
+    # of it depends on either, and it rebuilds the graph and reruns Louvain
+    # (seeded, so the result is the same each time) -- ~160 s per call on
+    # the densest 100,000-node datasets, eight calls per dataset before.
+    # A failure here zeroes every cell, as it did when it ran per cell.
+    try:
+        data_tree = data_preparation(string_name, GARGAML_COLUMNS, directed, score_type='weighted_average')
+    except Exception as exc:
+        print("Error in data preparation for: {} ({!r})".format(string_name, exc))
+        return {pattern: {tree_model: _legacy_zero_metrics() for tree_model in tree_models}
+                for pattern in patterns}
+
     results = {}
     for pattern in patterns:
         results[pattern] = {}
         for tree_model in tree_models:
             try:
-                metrics = train_pipeline(string_name, pattern, tree_model, directed)
+                metrics = train_pipeline(data_tree, string_name, pattern, tree_model)
             except Exception as exc:
                 print("Error in training pipeline for: {} ({!r})".format(string_name, exc))
                 metrics = _legacy_zero_metrics()
@@ -130,7 +142,11 @@ def gargaml_tree_synthetic(string_name, directed):
 
 
 def main():
-    directed = False
+    # GARGAML_DIRECTED=1 selects the directed measures; a bare run keeps the
+    # undirected default. Each direction is its own output file, so the two
+    # are separate runs (slurm/tree_synth.slurm takes it in its argument).
+    directed = env_override("directed", False, as_bool)
+    echo_config(os.path.basename(__file__), directed=directed, results_dir=RESULTS_DIR)
     n_nodes_list = [
         100, 
         10000, 
@@ -183,7 +199,9 @@ def main():
                                 results = gargaml_tree_synthetic(string_name, directed)
                                 results_dict[string_name] = results
     results_df = pd.DataFrame(results_dict)
-    results_df.to_csv("synthetic_tree_"+str(directed)+"_full.csv")
+    # Into the results directory, beside the measures it was computed from --
+    # not the repository root, where the published run's files live.
+    write_csv(results_df, RESULTS_DIR+"/synthetic_tree_"+str(directed)+"_full.csv", index=True)
 
 if __name__ == '__main__':
     main()

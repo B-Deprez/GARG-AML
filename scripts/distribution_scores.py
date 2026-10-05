@@ -12,7 +12,7 @@ from src.utils.evaluation import (CUT_OFFS, LEGACY_METRICS, SEED,
                                   metric_names, metric_records, nan_metrics,
                                   read_folds, write_metrics)
 from src.utils.naming import gargaml_key
-from src.utils.runtime import resolve_results_dir
+from src.utils.runtime import resolve_results_dir, select_datasets, write_csv
 import pandas as pd
 import timeit
 
@@ -40,6 +40,16 @@ USE_FOLDS = True
 # _sanitise substitutes -1 before anything gets str()'d into a log line.
 def _sanitise(value):
     return -1 if isinstance(value, float) and np.isnan(value) else value
+
+# A synthetic result cell uses the layout and key spelling of the cells
+# scripts/gargaml_tree_synthetic*.py write (Precision/F1 capitalised, every
+# ranking metric beside them), so the notebook reads the base score and the
+# tree models the same way. Plain floats, so a NumPy 2 repr does not put
+# np.float64(...) into the file.
+SYNTHETIC_KEY_RENAME = {"precision": "Precision", "f1": "F1"}
+
+def _synthetic_cell(metrics):
+    return {SYNTHETIC_KEY_RENAME.get(k, k): _sanitise(float(v)) for k, v in metrics.items()}
 
 def divergence_metric(dist_0, dist_1):
     mean_0 = np.mean(dist_0)
@@ -378,8 +388,12 @@ def distribution_scores_synthetic(dataset, results_df, str_directed, str_supervi
     spread that feeds the Friedman/Nemenyi analysis, so evaluation here is
     over the full population.
 
-    The returned list length is load-bearing and must stay 4 (see the
-    comment on the ``results[column]`` assignment below).
+    That population is not the tree models' 30% test split, and P@K is
+    sensitive to it: an injected pattern labels ~31 nodes (median), so the
+    full population can fill a top 10 that the tree split, holding ~9 of
+    them, cannot. Compare R@K or AUC-PR across the two, not P@K alone.
+
+    Returns ``{pattern: {"score": cell}}``, the tree scripts' cell layout.
     """
     columns = ['laundering', 'separate', 'new_mules', 'existing_mules']
     label_data = pd.read_csv("data/label_data_"+dataset+".csv")
@@ -398,21 +412,17 @@ def distribution_scores_synthetic(dataset, results_df, str_directed, str_supervi
         y_pred = laundering_combined["GARGAML"].values
 
         try:
-            # No natural 0/1 prediction for a raw score -- see distribution_scores_IBM.
+            # No natural 0/1 prediction for a raw score -- see
+            # distribution_scores_IBM -- so Precision and F1 come back NaN
+            # (written -1) rather than invented at some threshold.
             metrics = evaluate_scores(y_true, y_pred)
-            precision, f1, auc_roc, auc_pr = (_sanitise(metrics[k]) for k in LEGACY_METRICS)
         except Exception as exc:
             print("    skipped: "+repr(exc))
-            precision = f1 = auc_roc = auc_pr = -1
+            metrics = nan_metrics()
 
-        # Fixed at exactly 4: notebooks/VisualisationResults.ipynb's
-        # gargaml_results() unpacks this as `precision, f1_score, ROC, PR =
-        # tuple(...)`, so a 5th element raises there on every line.
-        results[column] = [precision, f1, auc_roc, auc_pr]
-        print("Precision: ", precision)
-        print("F1: ", f1)
-        print("AUC-ROC: ", auc_roc)
-        print("AUC-PR: ", auc_pr)
+        results[column] = {"score": _synthetic_cell(metrics)}
+        for name in LEGACY_METRICS + ["P@10"]:
+            print(name+": ", metrics[name])
 
     return results
 
@@ -421,7 +431,11 @@ def general_calculation(dataset, directed, supervised, score_type):
     str_supervised = "supervised" if supervised else "unsupervised"
 
     if supervised:
-        results_df_measures = pd.read_csv(RESULTS_DIR+"/"+dataset+"_GARGAML_"+str_directed+".csv")
+        # The synthetic undirected measures carry a "_parallel" suffix
+        # (gargaml_undirected_synth.py); the IBM ones and every directed file
+        # do not. Same rule as gargaml_tree_synthetic*.py's data_preparation.
+        suffix = "_parallel" if dataset.startswith("synthetic") and not directed else ""
+        results_df_measures = pd.read_csv(RESULTS_DIR+"/"+dataset+"_GARGAML_"+str_directed+suffix+".csv")
         results_df = define_gargaml_scores(results_df_measures, directed=directed, score_type=score_type)
 
     else:
@@ -458,6 +472,7 @@ def benchmark_synthetic(
         ]
     n_patterns_list = [3, 5]
 
+    results_dict = {}
     for n_nodes in n_nodes_list:
         for n_patterns in n_patterns_list:
             if n_patterns <= 0.06*n_nodes:
@@ -467,29 +482,34 @@ def benchmark_synthetic(
                         for m_edges in m_edges_list:
                             string_name = 'synthetic_' + generation_method + '_'  + str(n_nodes) + '_' + str(m_edges) + '_' + str(p_edges) + '_' + str(n_patterns)
                             print("====", string_name, "====")
-                            results_int = general_calculation(string_name, directed, supervised, score_type)
-                            with open(RESULTS_DIR+'/results_performance_'+str_directed+'_'+str_supervised+'.txt', 'a') as f:
-                                f.write(string_name+' [Precision, F1, AUC-ROC, AUC-PR]: '+str(results_int)+'\n')
+                            results_dict[string_name] = general_calculation(string_name, directed, supervised, score_type)
                     if generation_method == 'Erdos-Renyi':
                         m_edges = 0
                         for p_edges in p_edges_list:
                             string_name = 'synthetic_' + generation_method + '_'  + str(n_nodes) + '_' + str(m_edges) + '_' + str(p_edges) + '_' + str(n_patterns)
                             print("====", string_name, "====")
-                            results_int = general_calculation(string_name, directed, supervised, score_type)
-                            with open(RESULTS_DIR+'/results_performance_'+str_directed+'_'+str_supervised+'.txt', 'a') as f:
-                                f.write(string_name+' [Precision, F1, AUC-ROC, AUC-PR]: '+str(results_int)+'\n')
+                            results_dict[string_name] = general_calculation(string_name, directed, supervised, score_type)
 
                     if generation_method == 'Watts-Strogatz':
                         for m_edges in m_edges_list:
                             for p_edges in p_edges_list:
                                 string_name = 'synthetic_' + generation_method + '_'  + str(n_nodes) + '_' + str(m_edges) + '_' + str(p_edges) + '_' + str(n_patterns)
                                 print("====", string_name, "====")
-                                results_int = general_calculation(string_name, directed, supervised, score_type)
-                                with open(RESULTS_DIR+'/results_performance_'+str_directed+'_'+str_supervised+'.txt', 'a') as f:
-                                    f.write(string_name+' [Precision, F1, AUC-ROC, AUC-PR]: '+str(results_int)+'\n')
+                                results_dict[string_name] = general_calculation(string_name, directed, supervised, score_type)
+
+    # One file per (direction, supervision), patterns x datasets, written once
+    # at the end -- the layout of the synthetic_tree_*.csv files, which
+    # notebooks/VisualisationResults.ipynb reads beside it. It replaces the
+    # appended results_performance_<direction>_<supervision>.txt log, whose
+    # four-element lists had no room for the ranking metrics.
+    out_path = RESULTS_DIR+'/synthetic_score_'+str_directed+'_'+str_supervised+'.csv'
+    write_csv(pd.DataFrame(results_dict), out_path, index=True)
+    print("wrote "+out_path)
 
 if __name__ == "__main__":
-    datasets = ["HI-Small", "LI-Large"]  #Synthetic, HI-Small, LI-Large
+    # GARGAML_DATASET=synthetic runs the 66-dataset synthetic grid instead
+    # (slurm/distribution_scores.slurm takes it as its argument).
+    datasets = select_datasets(["HI-Small", "LI-Large"])  # synthetic, HI-Small, LI-Large
     for dataset in datasets:
         for directed in [True, False]:
             supervised = True

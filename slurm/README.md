@@ -90,7 +90,15 @@ tree=$(slurm/submit.sh slurm/tree.slurm HI-Small --array=4 --dependency=afterok:
 # (main()), so submit them directly with sbatch, not through submit.sh.
 blk=$(sbatch --parsable --dependency=afterok:$dir:$und slurm/tree_blocks.slurm | cut -d";" -f1)
 ifj=$(sbatch --parsable --dependency=afterok:$dir:$und slurm/if.slurm | cut -d";" -f1)
-ts=$(slurm/submit.sh   slurm/tree_synth.slurm base --dependency=afterok:$sd1:$su1)
+# One job per (variant, direction) -- the argument has no default direction.
+# VisualisationResults.ipynb reads the 3 and 5 variants; $ts joins the four ids.
+ts3u=$(slurm/submit.sh slurm/tree_synth.slurm 3_undirected --dependency=afterok:$sd1:$su1)
+ts3d=$(slurm/submit.sh slurm/tree_synth.slurm 3_directed   --dependency=afterok:$sd1:$su1)
+ts5u=$(slurm/submit.sh slurm/tree_synth.slurm 5_undirected --dependency=afterok:$sd1:$su1)
+ts5d=$(slurm/submit.sh slurm/tree_synth.slurm 5_directed   --dependency=afterok:$sd1:$su1)
+ts=$ts3u:$ts3d:$ts5u:$ts5d
+# The base score on the synthetic grid (both directions, one job):
+sds=$(slurm/submit.sh slurm/distribution_scores.slurm synthetic --dependency=afterok:$sd1:$su1)
 
 # --- Stage 2: GraphSAGE (1 job, GPU) ---------------------------------------
 # afterok on the TREE job: it consumes results/<dataset>_folds.csv.
@@ -178,8 +186,9 @@ slurm/submit.sh slurm/collect.slurm all
 - **A 16 h kill loses a whole direction.** Stage 1 resumes per file, not per
   node. The 16 h is the budget the paper states, not a measured runtime, so if
   the limit is hit, resubmit with a longer `--time`.
-- **`distribution_scores.slurm` always runs HI-Small and LI-Large both** (its
-  dataset list sits inside `if __name__`). Wave 3 therefore also rewrites
+- **`distribution_scores.slurm` with no argument runs HI-Small and LI-Large
+  both** (an argument -- a dataset name, or `synthetic` -- narrows it to that
+  one). Wave 3 submits it bare and therefore also rewrites
   HI-Small's base-score metrics, using whichever `HI-Small_folds.csv` is in
   `results-revision/` at that point.
 - **Not in this run.** `tree_blocks.slurm` is redundant here, because
