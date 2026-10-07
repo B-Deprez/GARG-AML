@@ -67,7 +67,9 @@ folds:
 3. **Task 1 third — code DONE, runs outstanding.** The GraphSAGE baseline lives in
    `src/methods/graphsage.py` + `scripts/graphsage_baseline.py`, with both feature
    configs (`topology` = degree/log-degree strict parity, `attributes` = + amount,
-   count, currency, bank and timing aggregates), early stopping on validation AUC-PR
+   count, currency and bank aggregates — timing features were dropped on 2026-10-06
+   because an account's active span is hindsight; every `attributes` result written
+   before then is stale), early stopping on validation AUC-PR
    off a 10% slice carved from the *training* fold, per-epoch checkpointing, and
    separate preprocessing / fit / inference timing plus peak host and GPU memory.
    `torch` / `torch-geometric` are in `requirements.txt`. **Never** feed it GARG-AML

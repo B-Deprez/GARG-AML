@@ -17,8 +17,11 @@ Feature configurations
     the number of distinct counterparties all equal the degree.
 
 ``attributes`` (config B)
-    Config A plus per-account amount, count, currency, bank and timing
-    aggregates.
+    Config A plus per-account amount, count, currency and bank aggregates.
+    Deliberately without timing features (active span, gap between
+    transactions): an account that launders is typically short-lived, so its
+    span summarises the outcome and is only known after the fact. The other
+    aggregates also cover the whole period, as GARG-AML's graph does.
 
 Caching
 -------
@@ -63,8 +66,6 @@ SEED = 1997
 # these values -- "00123" and 123 are different accounts otherwise.
 ID_DTYPES = {"From Bank": str, "To Bank": str, "Account": str, "Account.1": str}
 
-TIMESTAMP_FORMAT = "%Y/%m/%d %H:%M"
-
 # Column groups per feature config; these names form the feature schema.
 TOPOLOGY_FEATURES = ["degree", "log_degree"]
 
@@ -73,8 +74,17 @@ ATTRIBUTE_FEATURES = [
     "amount_out_sum", "amount_out_mean", "amount_out_std", "amount_out_max",
     "amount_in_sum", "amount_in_mean", "amount_in_std", "amount_in_max",
     "n_currencies", "n_counterparty_banks",
-    "active_span_days", "mean_gap_hours",
 ]
+
+# The attributes matrix as cached before the timing features were dropped, in
+# its column order. build_features slices a cache of this width down to the
+# current columns -- exact, since standardisation is per column -- instead of
+# re-reading the 16 GB transaction file.
+_LEGACY_ATTRIBUTE_COLUMNS = (
+    ["degree", "log_degree", "n_sent", "n_received",
+     "amount_out_sum", "amount_out_mean", "amount_out_std", "amount_out_max",
+     "amount_in_sum", "amount_in_mean", "amount_in_std", "amount_in_max",
+     "n_currencies", "n_counterparty_banks", "active_span_days", "mean_gap_hours"])
 
 FEATURE_CONFIGS = {
     "topology": TOPOLOGY_FEATURES,
@@ -87,7 +97,6 @@ LOG_SCALED_FEATURES = {
     "degree", "n_sent", "n_received",
     "amount_out_sum", "amount_out_mean", "amount_out_std", "amount_out_max",
     "amount_in_sum", "amount_in_mean", "amount_in_std", "amount_in_max",
-    "active_span_days", "mean_gap_hours",
 }
 
 
@@ -215,7 +224,6 @@ class _AccountAggregator:
     def __init__(self):
         self.sums = {}      # role -> DataFrame indexed by account
         self.pairs = {}     # name -> DataFrame of unique (account, value)
-        self.times = {}     # role -> DataFrame of per-account min/max
 
     def _accumulate_sums(self, role, frame):
         grouped = frame.groupby("account").agg(
@@ -238,17 +246,8 @@ class _AccountAggregator:
             unique = pd.concat([self.pairs[name], unique]).drop_duplicates()
         self.pairs[name] = unique
 
-    def _accumulate_times(self, frame):
-        grouped = frame.groupby("account")["timestamp"].agg(["min", "max"])
-        if "all" in self.times:
-            combined = pd.concat([self.times["all"], grouped])
-            grouped = combined.groupby(level=0).agg(min=("min", "min"), max=("max", "max"))
-        self.times["all"] = grouped
-
     def add_chunk(self, chunk):
         chunk = chunk.copy()
-        chunk["Timestamp"] = pd.to_datetime(chunk["Timestamp"], format=TIMESTAMP_FORMAT,
-                                            errors="coerce")
 
         for role, account_col, amount_col in [("out", "Account", "Amount Paid"),
                                               ("in", "Account.1", "Amount Received")]:
@@ -269,11 +268,6 @@ class _AccountAggregator:
         self._accumulate_pairs("currency", pd.concat([
             pd.DataFrame({"account": chunk["Account"], "value": chunk["Payment Currency"]}),
             pd.DataFrame({"account": chunk["Account.1"], "value": chunk["Receiving Currency"]}),
-        ], ignore_index=True))
-
-        self._accumulate_times(pd.concat([
-            pd.DataFrame({"account": chunk["Account"], "timestamp": chunk["Timestamp"]}),
-            pd.DataFrame({"account": chunk["Account.1"], "timestamp": chunk["Timestamp"]}),
         ], ignore_index=True))
 
     def frame(self, node_order):
@@ -298,26 +292,15 @@ class _AccountAggregator:
             counts = self.pairs[name].groupby("account").size()
             out[column] = counts.reindex(index).fillna(0).values
 
-        times = self.times["all"].reindex(index)
-        span_days = (times["max"] - times["min"]).dt.total_seconds() / 86400.0
-        out["active_span_days"] = np.nan_to_num(span_days.values)
-
-        # Mean gap between an account's transactions; zero for a single-transaction
-        # account ("no gap observed"), which also keeps the column NaN-free.
-        n_total = out["n_sent"].values + out["n_received"].values
-        with np.errstate(divide="ignore", invalid="ignore"):
-            gap = np.where(n_total > 1, out["active_span_days"].values * 24.0 / (n_total - 1), 0.0)
-        out["mean_gap_hours"] = np.nan_to_num(gap)
-
         return out
 
 
 def build_attribute_features(dataset, node_order, chunksize=2_000_000):
-    """Per-account amount/count/currency/bank/timing aggregates (config B)."""
+    """Per-account amount/count/currency/bank aggregates (config B)."""
     path = trans_path(dataset)
     _, banks = parse_view(dataset)  # aggregate only what a bank view sees
     banks = resolve_banks(banks, path)
-    columns = ["Timestamp", "From Bank", "Account", "To Bank", "Account.1",
+    columns = ["From Bank", "Account", "To Bank", "Account.1",
                "Amount Received", "Receiving Currency", "Amount Paid",
                "Payment Currency"]
 
@@ -347,7 +330,19 @@ def build_features(dataset, node_order, degree, config, results_dir="results", c
     check_config(config)
     cache_path = graph_cache_paths(dataset, config, results_dir)[1]
     if cache and os.path.exists(cache_path):
-        return torch.load(cache_path, weights_only=False)
+        x = torch.load(cache_path, weights_only=False)
+        expected = FEATURE_CONFIGS[config]
+        if x.shape[1] == len(expected):
+            return x
+        if config == "attributes" and x.shape[1] == len(_LEGACY_ATTRIBUTE_COLUMNS):
+            # Cached with the timing features: drop those columns, keep the rest.
+            keep = [_LEGACY_ATTRIBUTE_COLUMNS.index(c) for c in expected]
+            x = x[:, keep]
+            torch.save(x, cache_path)
+            return x
+        raise ValueError(cache_path+" has "+str(x.shape[1])+" columns, expected "
+                         +str(len(expected))+" for config "+repr(config)
+                         +" -- delete it to rebuild")
 
     frame = pd.DataFrame({"degree": degree, "log_degree": np.log1p(degree)},
                          index=pd.Index(node_order, name="account"))
@@ -373,8 +368,7 @@ def feature_schema(config):
     check_config(config)
     kinds = {"degree": "degree", "log_degree": "degree",
              "n_sent": "count", "n_received": "count",
-             "n_currencies": "count", "n_counterparty_banks": "count",
-             "active_span_days": "timing", "mean_gap_hours": "timing"}
+             "n_currencies": "count", "n_counterparty_banks": "count"}
     rows = []
     for column in FEATURE_CONFIGS[config]:
         rows.append({

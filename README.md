@@ -158,8 +158,10 @@ from `results-0/` and `results-aa/`, and FlowScope's IBM tidy metrics from
   `results/<dataset>_<direction><suffix>_feature_schema.csv`.
 - **GraphSAGE baseline.** Two feature configurations are reported side by
   side: `topology` (degree and log-degree, strict parity with GARG-AML's
-  inputs) and `attributes` (adds per-account amount, count, currency, bank and
-  timing aggregates, deliberately generous). Neither ever receives a GARG-AML
+  inputs) and `attributes` (adds per-account amount, count, currency and bank
+  aggregates, deliberately generous but without timing features: an account's
+  active span is only known after the fact, and laundering accounts are
+  short-lived). Neither ever receives a GARG-AML
   score, block density or block size. It reads the same
   `results/<dataset>_folds.csv` partition as the tree models, so the two are
   paired fold by fold, and early stopping uses a stratified 10% slice carved
