@@ -66,7 +66,7 @@ wave-by-wave procedure for LI-Large.
 | Performance tables and figures | `notebooks/VisualisationResults.ipynb` (IBM part reads the tidy `*_metrics.csv` files in `results-revision/`, one row type for every model -- `IBM_FOLD_MODE`) | `results-revision/<dataset>_AUC-ROC_AUC-PR.pdf`, LaTeX tables |
 | Critical-difference diagrams (Figs. 10-11) | `notebooks/VisualisationResults.ipynb` | `results/CD_ROC_full.pdf`, `results/CD_PR_full.pdf` |
 | Friedman &chi;&sup2; / p-values, multiple-testing control, Nemenyi matrices | `notebooks/VisualisationResults.ipynb` | `results/friedman_results.csv` (per metric and pattern: &chi;&sup2;, df, raw *p*, Bonferroni- and Holm-adjusted *p*, the Nemenyi critical difference) and `results/nemenyi_pvalues_<metric>_<pattern>.csv` |
-| Runtime / scalability comparison (Fig. 6) | `notebooks/VisualisationRunTime.ipynb` | `results/time_boxplot_norm.pdf` |
+| Runtime / scalability comparison (Fig. 6) | `notebooks/VisualisationRunTime.ipynb` | `results-revision/time_boxplot_norm.pdf`, plus `results-revision/time_boxplot_ibm.pdf` (the IBM datasets, with GraphSAGE) |
 | Synthetic network illustrations | `notebooks/VisualisationNetwork.ipynb` | `data/combined_synthetic_networks.pdf` |
 | Worked toy example (Appendix A) | `notebooks/toyexample.ipynb` | inline figures |
 | Edges severed by the Louvain filter | `notebooks/LouvainEdgeSeverance.ipynb` | inline table |
