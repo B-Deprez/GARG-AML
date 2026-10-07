@@ -44,6 +44,7 @@ Running a script bare behaves exactly as it always has.
 | `GARGAML_N_CPU` | worker-pool width: a fixed `min(4, cpu_count() // 2)` for the measure scripts, `SLURM_CPUS_PER_TASK` for `gargaml_tree.py`, where `1` means serial (see the caveat below) |
 | `GARGAML_N_FOLDS` | `gargaml_tree.py` split protocol; `2` is the cheap test setting |
 | `GARGAML_CONFIGS` | GraphSAGE feature configs (`topology`, `attributes`) |
+| `GARGAML_TARGETS` | GraphSAGE targets, comma-separated; replaces (may widen) the dataset's list, checked against `<dataset>_folds.csv` |
 | `GARGAML_INSTITUTIONS` | `partial_observability.py` bank view |
 | `GARGAML_FORCE=1` | recompute even when the output CSV already exists |
 | `GARGAML_REQUIRE_GPU=1` | turn the silent CPU fallback into an immediate failure |
@@ -100,9 +101,16 @@ ts=$ts3u:$ts3d:$ts5u:$ts5d
 # The base score on the synthetic grid (both directions, one job):
 sds=$(slurm/submit.sh slurm/distribution_scores.slurm synthetic --dependency=afterok:$sd1:$su1)
 
-# --- Stage 2: GraphSAGE (1 job, GPU) ---------------------------------------
-# afterok on the TREE job: it consumes results/<dataset>_folds.csv.
-gs=$(slurm/submit.sh slurm/graphsage.slurm HI-Small --dependency=afterok:$tree)
+# --- Stage 2: GraphSAGE (GPU) ----------------------------------------------
+# The full sweep is 540 fits on HI-Small -- too long for one job. Run it one
+# job per target and merge: see "GraphSAGE, one job per target" below.
+
+# --- FlowScope baseline metrics (CPU) ---------------------------------------
+# Scores FlowScope's saved pickles on GARG-AML's folds, so afterok on the TREE
+# job (it writes HI-Small_folds.csv). Needs the FlowScope fork on the VSC; set
+# FLOWSCOPE_DIR if it is not a sibling of GARG-AML. Not fed into collect.slurm:
+# VisualisationResults.ipynb reads <dataset>_directed_flowscope_metrics.csv.
+fl=$(slurm/submit.sh slurm/flowscope_evaluate.slurm HI-Small --mem=64g --dependency=afterok:$tree)
 
 # --- Appendices / diagnostics (CPU, independent of stage 1) -----------------
 ps=$(slurm/submit.sh  slurm/pattern_splitting.slurm HI-Small)
@@ -118,7 +126,7 @@ ld=$(slurm/submit.sh  slurm/label_distribution.slurm HI-Small)
 # afterANY, so one failed arm does not block the tables: build_tables.py
 # announces missing tables and renders unfittable cells as "--" by design.
 slurm/submit.sh slurm/collect.slurm all \
-  --dependency=afterany:$tree:$blk:$ifj:$ts:$gs:$ps:$po1:$po2:$dd
+  --dependency=afterany:$tree:$blk:$ifj:$ts:$ps:$po1:$po2:$dd
 ```
 
 ### LI-Large, submitted in waves
@@ -164,8 +172,11 @@ slurm/submit.sh slurm/tree.slurm LI-Large --array=7 --cpus-per-task=36 --time=16
 # needs all four caches from graphsage_prep (prep.csv is written last):
 # without them it rebuilds the labels on the GPU node and runs out of memory.
 ls -lh results-revision/LI-Large_folds.csv results-revision/LI-Large_graphsage_*
-slurm/submit.sh slurm/graphsage.slurm LI-Large --time=24:00:00 --mem=120g
+# GraphSAGE itself: one job per target, see "GraphSAGE, one job per target".
 sbatch --time=16:00:00 --mem=200g slurm/distribution_scores.slurm
+# FlowScope's LI-Large metrics: reads the folds file plus the fork's two pickles
+# and the 16.7 GB transaction file (label build, ~167 GiB like label_distribution).
+slurm/submit.sh slurm/flowscope_evaluate.slurm LI-Large --time=06:00:00 --mem=200g
 
 # --- Wave 4: once squeue shows nothing left for LI-Large --------------------
 # LI-Large_directed_all_metrics.csv is the tree job's last section; until it
@@ -174,6 +185,38 @@ ls results-revision/LI-Large_*metrics.csv
 slurm/submit.sh slurm/collect.slurm all
 ```
 
+- **GraphSAGE `attributes` rerun (no timing features).** The config dropped
+  `active_span_days` and `mean_gap_hours` on 2026-10-06 (hindsight: laundering
+  accounts are short-lived, so their span is known only after the fact), so every
+  `*_graphsage_attr_*` file, `LI-Large_graphsage_{tidy,runs,summary}.csv` and
+  the old `attributes` rows in them are stale and must be replaced. The cached
+  `LI-Large_graphsage_x_attributes.pt` is sliced to the 14 remaining columns on
+  first load (exact: standardisation is per column), so no 16 GB re-read is
+  needed. Rerun the `attributes` config only, writing to a separate directory so
+  the topology results are not overwritten and `load_metrics` does not count the
+  rows twice (it globs `results-revision/*_metrics.csv`). Split by cut-off,
+  because the old run hit the 50-epoch cap at cut-off 0.0 (best validation
+  AUC-PR at the last epoch in folds 0-2) while the cut-off 0.9 cells have no
+  positives in the validation slice, so they train a *fixed* number of epochs
+  and a higher cap would change what they are:
+  ```bash
+  # validated cells, higher cap
+  GARGAML_EPOCHS=200 GARGAML_CONFIGS=attributes GARGAML_CUTOFFS=0.0,0.1,0.5 \
+  GARGAML_OUTPUT_DIR=results-revision/graphsage_attr_ep200 \
+    slurm/submit.sh slurm/graphsage.slurm LI-Large --time=16:00:00 --mem=120g
+  # unvalidated cut-off, same fixed 50 epochs as the topology config
+  GARGAML_CONFIGS=attributes GARGAML_CUTOFFS=0.9 \
+  GARGAML_OUTPUT_DIR=results-revision/graphsage_attr_0.9 \
+    slurm/submit.sh slurm/graphsage.slurm LI-Large --time=06:00:00 --mem=120g
+  ```
+  Needs the wave-3 caches and folds in `results-revision/`. A fit took ~1,165 s
+  per 50 epochs (~23 s/epoch); 15 fits at a 200-epoch cap are at most ~19 h, but
+  early stopping ends most far sooner, hence 16 h. Checkpoints carry an `_ep200`
+  suffix, so those fits start from scratch. If best-epoch sits at the cap again,
+  raise it. Report the 0.9 cells as unvalidated. **Cold preprocessing time:** the
+  prep CSV's `attributes` seconds (1,930 s) still include parsing every timestamp,
+  which no longer happens. To re-measure, delete `LI-Large_graphsage_x_attributes.pt`
+  and run `slurm/graphsage_prep.slurm LI-Large`.
 - **The wave-2 gate is the one that matters.** A tree job that starts before a
   measure file exists skips that direction and still exits 0.
 - **GraphSAGE's preprocessing time is a cache load on LI-Large.** The GPU job
@@ -196,6 +239,71 @@ slurm/submit.sh slurm/collect.slurm all
   since `gargaml_IF.py` hardcodes `dataset = "HI-Small"` in `main()`.
   `LI-Large_nolouvain` (index 9) is expected to be infeasible; see Known gaps.
 
+
+### GraphSAGE, one job per target
+
+The full GraphSAGE sweep is the tree models' grid: 6 cut-offs x 9 targets on
+HI-Small (540 fits), 4 x 9 on LI-Large (360). Its targets are independent, so
+it runs as 18 GPU jobs, one per (dataset, target), each writing to its own
+directory under `results-revision/graphsage_parts/`, then a merge writes the
+files a single full run would have, into `results-revision/`. Run from
+`$VSC_DATA/GARGAML/11.2Code/GARG-AML` after a `git pull`.
+
+```bash
+# --- Wave A: inputs --------------------------------------------------------
+# Both folds files (from the tree jobs) and LI-Large's four caches (from its
+# wave-1 graphsage_prep) must be listed. HI-Small has no caches yet: build
+# them once on a CPU node. Without them, nine jobs build and write the same
+# cache files at once.
+ls -lh results-revision/{HI-Small,LI-Large}_folds.csv results-revision/LI-Large_graphsage_*
+slurm/submit.sh slurm/graphsage_prep.slurm HI-Small
+
+# --- Wave B: once HI-Small_graphsage_prep.csv exists (minutes) --------------
+ls -lh results-revision/HI-Small_graphsage_*
+# Keep the outputs of the earlier LI-Large "Is Laundering"-only run: the
+# merge in wave C overwrites them.
+mkdir -p results-revision/graphsage_before_full
+cp results-revision/LI-Large_graphsage_{tidy,runs,summary}.csv \
+   results-revision/LI-Large_undirected_graphsage*_metrics.csv \
+   results-revision/LI-Large_*_graphsage_undirected_*combined.csv results-revision/graphsage_before_full/
+# A fresh checkpoint directory: that earlier run left checkpoints whose
+# signature matches, and resuming from one reports only the resumed epochs
+# as fit_seconds.
+ckpt=$VSC_SCRATCH/gargaml/checkpoints_full
+for t in "Is Laundering" FAN-OUT FAN-IN GATHER-SCATTER SCATTER-GATHER CYCLE RANDOM BIPARTITE STACK; do
+  tag=${t// /-}
+  for ds in HI-Small LI-Large; do
+    mem=64g; [ "$ds" = LI-Large ] && mem=120g
+    GARGAML_TARGETS="$t" GARGAML_CHECKPOINT_DIR=$ckpt \
+    GARGAML_OUTPUT_DIR=results-revision/graphsage_parts/${ds}_$tag \
+      slurm/submit.sh slurm/graphsage.slurm $ds --mem=$mem \
+        --output=slurm/logs/graphsage_${ds}_${tag}_%j.out \
+        --error=slurm/logs/graphsage_${ds}_${tag}_%j.err
+  done
+done
+
+# --- Wave C: once squeue shows no graphsage job left ------------------------
+# Merge on the login node (seconds). It refuses to write if a target is
+# missing or present twice -- resubmit that one job from wave B first.
+export PATH="${VSC_DATA}/miniconda3/bin:${PATH}"
+source activate gargaml
+for ds in HI-Small LI-Large; do
+  GARGAML_DATASET=$ds GARGAML_RESULTS_DIR=results-revision \
+  GARGAML_MERGE_FROM=results-revision/graphsage_parts python -u scripts/graphsage_baseline.py
+done
+```
+
+- **Time.** 16 h per job, the script's default. One target is 60 fits on
+  HI-Small and 40 on LI-Large; at LI-Large's measured 17-23 s/epoch, every
+  fit running to the 50-epoch cap would take ~11 h. Most do not: validated
+  cells early-stop, and folds with no positives are skipped.
+- **Memory.** LI-Large needs `--mem=120g`, the most `gpu_a100` allows per
+  GPU. That is enough only because its caches already exist; without them the
+  job rebuilds the labels (~167 GiB) and runs out of memory.
+- **The merge is the only output that counts.** `load_metrics` reads only the
+  top level of `results-revision/`, so neither `VisualisationResults.ipynb`
+  nor `build_tables.py` sees `graphsage_parts/` until wave C has run.
+
 ---
 
 ## What depends on what
@@ -206,6 +314,7 @@ data/  ──┬─► measures_ibm_{dir,undir}   ──┬─► tree ──►
          │                                └─► if
          ├─► graphsage_prep ───────────────────► graphsage   (caches; LI-Large)
          ├─► measures_synth_{dir,undir} ────► tree_synth           (see gap below)
+         ├─► flowscope_evaluate  (needs tree's folds.csv; reads the FlowScope fork)
          ├─► pattern_splitting          ─┐
          ├─► partial_obs                 ├──► collect  (afterany)
          └─► directed_diagnosis         ─┘
@@ -219,7 +328,7 @@ Two dependencies are real and verified in the code:
   if you want the undirected arm to proceed when the directed one fails.
 - **tree → GraphSAGE, same dataset name.** `gargaml_tree.py` writes
   `results/<dataset>_folds.csv` (only when `N_FOLDS >= 2`), and
-  `graphsage_baseline.py:361` reads it for both the fold count and fold
+  `graphsage_baseline.py`'s `main()` reads it for both the fold count and fold
   membership. GraphSAGE has no `N_FOLDS` of its own, so it inherits whatever the
   tree ran with — **a 2-fold test partition silently yields a 2-fold GraphSAGE
   run**. `results/HI-Small_folds.csv` currently holds folds `[0, 1]` from a

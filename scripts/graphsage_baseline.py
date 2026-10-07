@@ -17,16 +17,28 @@ GARG-AML score, block density or block size enters the model.
 
 Sweep
 -----
-HI-Small  4 cut-offs x 3 targets x 5 folds x 2 configs.
-LI-Large  4 cut-offs x 1 target  x 5 folds x 2 configs.
+The tree models' grid (gargaml_tree.py), cell for cell:
 
-This is a reduced grid rather than gargaml_tree.py's full 6 x 9 sweep: the
-cut-offs are the headline slice ``HEADLINE_CUTOFFS`` and the HI-Small targets
-are the pooled label plus the two patterns GARG-AML targets (GATHER-SCATTER,
-SCATTER-GATHER). Widen ``DATASETS`` below to extend it.
+HI-Small  6 cut-offs x 9 targets x 5 folds x 2 configs = 540 fits.
+LI-Large  4 cut-offs x 9 targets x 5 folds x 2 configs = 360 fits.
+
+LI-Large runs the headline slice ``HEADLINE_CUTOFFS`` only, as the tree grid
+does. The first runs were a logged reduction of this (headline cut-offs, three
+HI-Small targets, "Is Laundering" alone on LI-Large); ``GARGAML_CUTOFFS`` and
+``GARGAML_TARGETS`` narrow a run to any subset.
 
 A cell with too few positives to fit -- cut-off 0.9 on some targets -- is
 reported as NaN with a reason, never dropped.
+
+Running in parallel
+-------------------
+A full sweep is far too long for one GPU job, and its targets are independent,
+so it runs as one job per target (``GARGAML_TARGETS``), each writing to its own
+``GARGAML_OUTPUT_DIR`` under a common parent. ``GARGAML_MERGE_FROM=<parent>``
+then combines them into the files one full sweep would have written, in its
+cut-off x target order (slurm/README.md has the commands). Run the prep job
+first: without the caches, every job builds and writes the same cache files
+at once.
 
 Preparing on a CPU node
 -----------------------
@@ -68,6 +80,7 @@ Caches (per dataset, shared by both configs where they can be)
 None of the caches is ever invalidated; delete one to rebuild it.
 """
 
+import glob
 import os
 import sys
 import time
@@ -96,6 +109,7 @@ from src.methods.graphsage import (
     train_fold,
 )
 from src.utils.evaluation import (
+    CUT_OFFS,
     HEADLINE_CUTOFFS,
     SEED,
     aggregate_folds,
@@ -114,16 +128,20 @@ MODEL_KEY = "graphsage_u"  # see src/utils/naming.py
 # Result-file suffix per feature config.
 CONFIG_SUFFIXES = {"topology": "_graphsage", "attributes": "_graphsage_attr"}
 
+# The same nine targets as gargaml_tree.py's TARGET_COLUMNS, in its order.
+TARGET_COLUMNS = ["Is Laundering", "FAN-OUT", "FAN-IN", "GATHER-SCATTER", "SCATTER-GATHER",
+                  "CYCLE", "RANDOM", "BIPARTITE", "STACK"]
+
 DATASETS = {
     "HI-Small": dict(
-        cut_offs=HEADLINE_CUTOFFS,
-        targets=["Is Laundering", "GATHER-SCATTER", "SCATTER-GATHER"],
+        cut_offs=CUT_OFFS,
+        targets=TARGET_COLUMNS,
         infer_batch_size=None,  # the full graph fits; full-graph inference
         num_workers=0,
     ),
     "LI-Large": dict(
         cut_offs=HEADLINE_CUTOFFS,
-        targets=["Is Laundering"],
+        targets=TARGET_COLUMNS,
         infer_batch_size=4096,  # the full graph will not fit on a GPU
         num_workers=4,          # with pyg-lib installed
     ),
@@ -144,8 +162,29 @@ CHECKPOINT_DIR = "results/checkpoints"
 # checkpoints are transient per-epoch state, unlike the quota'd $VSC_DATA --
 # and nothing downstream reads them except train_fold's own resume.
 DATASET = env_override("dataset", DATASET)
+# GARGAML_EPOCHS raises the cap for a rerun of cells that hit it (the attributes
+# config at cut-off 0.0 ran all 50 epochs with its best validation AUC-PR at
+# the last one). Checkpoints of a non-default cap get their own file names
+# (checkpoint_path), so a rerun trains from scratch and its fit_seconds is the
+# whole fit, not the continuation of a 50-epoch checkpoint.
+EPOCHS = env_override("epochs", EPOCHS, int)
+# GARGAML_CUTOFFS narrows the sweep to some of the dataset's cut-offs.
+CUTOFFS_OVERRIDE = env_override("cutoffs", None, lambda raw: [float(c) for c in as_list(raw)])
+# GARGAML_TARGETS replaces the dataset's target list -- one target per job is
+# how a sweep runs in parallel. It is checked against the targets the folds
+# file was split on rather than against DATASETS, so it may also widen it.
+TARGETS_OVERRIDE = env_override("targets", None, as_list)
+# GARGAML_MERGE_FROM=<parent>: combine the per-target runs under <parent> and
+# exit without fitting -- see "Running in parallel" above.
+MERGE_FROM = env_override("merge_from", None)
 CONFIGS = env_override("configs", CONFIGS, as_list)
 RESULTS_DIR = resolve_results_dir()
+# Everything this script *reads* (folds, label / graph / feature caches) stays in
+# RESULTS_DIR. GARGAML_OUTPUT_DIR redirects only what it *writes* -- the tidy
+# metrics, matrices, schema and the runs / summary files -- so a partial rerun
+# cannot overwrite the full sweep, and reporting.load_metrics (which globs
+# RESULTS_DIR/*_metrics.csv) does not count the rerun's rows twice.
+OUTPUT_DIR = env_override("output_dir", RESULTS_DIR)
 CHECKPOINT_DIR = env_override(
     "checkpoint_dir",
     os.path.join(os.environ["VSC_SCRATCH"], "gargaml", "checkpoints")
@@ -256,8 +295,9 @@ def checkpoint_path(dataset, config, cutoff, target, fold):
     """One checkpoint per fold, so a wall-clock kill costs one epoch."""
     os.makedirs(CHECKPOINT_DIR, exist_ok=True)
     safe_target = target.replace(" ", "-")
+    cap = "" if EPOCHS == 50 else "_ep"+str(EPOCHS)
     return (CHECKPOINT_DIR+"/"+dataset+"_"+config+"_"+str(cutoff)+"_"+safe_target+
-            "_fold"+str(fold)+".pt")
+            "_fold"+str(fold)+cap+".pt")
 
 
 def run_target(dataset, config, data, node_order, laundering_combined, folds_df,
@@ -396,13 +436,30 @@ def wide_runs_frame(long_df):
     return wide.join(meta).join(status).reset_index()
 
 
-def main():
-    dataset = DATASET
+def sweep_settings(dataset):
+    """``DATASETS``' entry for ``dataset``, with the cut-off and target overrides."""
     # DATASETS is keyed by the underlying dataset, so a view
     # ("HI-Small_bank012") inherits its base dataset's sweep and batching
     # settings instead of needing a duplicated entry.
-    settings = DATASETS[parse_view(dataset)[0]]
+    settings = dict(DATASETS[parse_view(dataset)[0]])
+    if CUTOFFS_OVERRIDE is not None:
+        unknown = [c for c in CUTOFFS_OVERRIDE if c not in settings["cut_offs"]]
+        if unknown:
+            raise ValueError("GARGAML_CUTOFFS "+str(unknown)+" not in this dataset's sweep "
+                             +str(settings["cut_offs"]))
+        settings["cut_offs"] = CUTOFFS_OVERRIDE
+    if TARGETS_OVERRIDE is not None:
+        settings["targets"] = TARGETS_OVERRIDE
+    return settings
+
+
+def main():
+    dataset = DATASET
+    settings = sweep_settings(dataset)
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
     device = get_device()
+    print("epochs cap: "+str(EPOCHS)+", cut-offs: "+str(settings["cut_offs"])
+          +", configs: "+str(CONFIGS)+", writing to "+OUTPUT_DIR)
 
     print("device: "+str(device))
     print("Transductive evaluation on the persisted folds; neighbour "
@@ -414,6 +471,18 @@ def main():
             folds_path+" not found -- run scripts/gargaml_tree.py with N_FOLDS >= 2 "
             "first; GraphSAGE reads that partition rather than re-deriving it.")
     folds_df = pd.read_csv(folds_path)
+
+    if TARGETS_OVERRIDE is not None:
+        # A target the folds file holds but not at every cut-off (too few
+        # positives to fold) is fine: run_target reports that cell as a gap.
+        # A target it never holds is a typo, which would otherwise surface as
+        # a full sweep of "no fold partition" gaps after the cache loads.
+        split_targets = sorted(folds_df["target"].unique())
+        unknown = [t for t in TARGETS_OVERRIDE if t not in split_targets]
+        if unknown:
+            raise ValueError("GARGAML_TARGETS "+str(unknown)+" not in "+folds_path
+                             +", which holds "+str(split_targets))
+    print("targets: "+str(settings["targets"]))
 
     laundering_combined = load_labels(dataset)
 
@@ -443,7 +512,7 @@ def main():
                 print("  bank view: "+str(int(eval_mask.sum()))+" of "+str(len(node_order))
                       +" nodes are clients and scored; the rest carry messages only")
 
-        schema_path = RESULTS_DIR+"/"+dataset+"_undirected"+suffix+"_feature_schema.csv"
+        schema_path = OUTPUT_DIR+"/"+dataset+"_undirected"+suffix+"_feature_schema.csv"
         feature_schema(config).to_csv(schema_path, index=False)
         print("  feature schema -> "+schema_path)
 
@@ -470,27 +539,97 @@ def main():
                                       device, settings, eval_mask=eval_mask)
 
         write_metrics(records, dataset, "undirected", suffix=suffix,
-                     results_dir=RESULTS_DIR, write_std=True)
+                     results_dir=OUTPUT_DIR, write_std=True)
         all_records += preprocess_records + records
 
-    long_df = metrics_frame(all_records)
+    write_outputs(dataset, metrics_frame(all_records))
 
-    # The complete record, both configs together, including the per-config
-    # preprocessing rows. Those carry cutoff=NaN and fold=NaN, which
-    # pivot_table drops as index keys and aggregate_folds filters out, so
-    # without this file the preprocessing timings would exist in no output
-    # at all.
-    tidy_path = RESULTS_DIR+"/"+dataset+"_graphsage_tidy.csv"
+
+def write_outputs(dataset, long_df):
+    """The tidy, per-run and fold-summary files, both configs together."""
+    # The complete record, including the per-config preprocessing rows. Those
+    # carry cutoff=NaN and fold=NaN, which pivot_table drops as index keys and
+    # aggregate_folds filters out, so without this file the preprocessing
+    # timings would exist in no output at all.
+    tidy_path = OUTPUT_DIR+"/"+dataset+"_graphsage_tidy.csv"
     long_df.to_csv(tidy_path, index=False)
     print("\ntidy metrics  -> "+tidy_path)
 
-    runs_path = RESULTS_DIR+"/"+dataset+"_graphsage_runs.csv"
+    runs_path = OUTPUT_DIR+"/"+dataset+"_graphsage_runs.csv"
     wide_runs_frame(long_df).to_csv(runs_path, index=False)
     print("per-run table -> "+runs_path)
 
-    summary_path = RESULTS_DIR+"/"+dataset+"_graphsage_summary.csv"
+    summary_path = OUTPUT_DIR+"/"+dataset+"_graphsage_summary.csv"
     aggregate_folds(long_df).to_csv(summary_path, index=False)
     print("fold summary  -> "+summary_path)
+
+
+def merge(dataset):
+    """Combine per-target runs into the outputs one full sweep would write.
+
+    Reads every ``MERGE_FROM/*/<dataset>_graphsage_tidy.csv`` -- one per
+    ``GARGAML_TARGETS`` job -- and writes the per-config metrics, matrices and
+    schema plus the tidy, runs and summary files to ``OUTPUT_DIR``. Refuses
+    to write if a (config, target) of the sweep is missing or was written by
+    two parts, so a failed or repeated job cannot pass for a complete sweep.
+    The sweep is resolved as for a fit, so ``GARGAML_CUTOFFS`` /
+    ``GARGAML_TARGETS`` / ``GARGAML_CONFIGS`` narrow what it expects.
+    """
+    settings = sweep_settings(dataset)
+    paths = sorted(glob.glob(os.path.join(MERGE_FROM, "*", dataset+"_graphsage_tidy.csv")))
+    if not paths:
+        raise FileNotFoundError("no "+dataset+"_graphsage_tidy.csv in any directory under "
+                                +MERGE_FROM)
+    df = pd.concat([pd.read_csv(p).assign(part=os.path.dirname(p)) for p in paths],
+                   ignore_index=True)
+    df = df[df["features"].isin(CONFIGS)]
+
+    preprocess = df["target"] == "(all)"
+    owners = df[~preprocess].groupby(["features", "target"])["part"].unique()
+    repeated = {k: list(v) for k, v in owners.items() if len(v) > 1}
+    if repeated:
+        raise ValueError("written by more than one part -- remove the stale one: "
+                         +str(repeated))
+    missing = [(c, t) for c in CONFIGS for t in settings["targets"] if (c, t) not in owners.index]
+    if missing:
+        raise ValueError("missing from "+MERGE_FROM+" -- rerun these before merging: "
+                         +str(missing))
+
+    # Every part records a preprocessing row set per config; after the prep
+    # job they are all cache loads (the cold builds are in prep_path), so one
+    # per config is kept, as a single full sweep would have written.
+    pre = df[preprocess].drop_duplicates(["features", "metric"])
+
+    # The order a full sweep writes in: config, then cut-off, then target,
+    # with each part's own fold order kept by the stable sort. write_metrics
+    # takes the matrices' row and column order from it.
+    rank = lambda values: {v: i for i, v in enumerate(values)}
+    fits = df[~preprocess].assign(
+        _c=lambda d: d["features"].map(rank(CONFIGS)),
+        _k=lambda d: d["cutoff"].map(rank(settings["cut_offs"])),
+        _t=lambda d: d["target"].map(rank(settings["targets"])).fillna(len(settings["targets"])))
+    fits = fits.sort_values(["_c", "_k", "_t"], kind="stable").drop(columns=["_c", "_k", "_t"])
+
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    frames = []
+    for config in CONFIGS:
+        suffix = CONFIG_SUFFIXES[config]
+        print("\n=== "+dataset+", "+pretty_config(MODEL_KEY, config)+" ===")
+        rows = fits[fits["features"] == config].drop(columns="part")
+        # The preprocessing rows' NaN fold made these float on the way in; a
+        # fit-only frame holds integers, as a single run writes them.
+        for column in ("fold", "n_test", "n_pos"):
+            if rows[column].notna().all():
+                rows[column] = rows[column].astype("int64")
+        for target in settings["targets"]:
+            print("  "+target+" <- "+owners[(config, target)][0])
+        feature_schema(config).to_csv(
+            OUTPUT_DIR+"/"+dataset+"_undirected"+suffix+"_feature_schema.csv", index=False)
+        write_metrics(rows.to_dict("records"), dataset, "undirected", suffix=suffix,
+                      results_dir=OUTPUT_DIR, write_std=True)
+        frames += [pre[pre["features"] == config].drop(columns="part"), rows]
+
+    write_outputs(dataset, metrics_frame(pd.concat(frames, ignore_index=True).to_dict("records")))
 
 
 def prep_path(dataset):
@@ -538,8 +677,11 @@ def prepare(dataset):
 if __name__ == "__main__":
     echo_config(__file__, dataset=DATASET, configs=CONFIGS, prepare_only=PREPARE_ONLY,
                 checkpoint_dir=CHECKPOINT_DIR, epochs=EPOCHS, patience=PATIENCE,
-                results_dir=RESULTS_DIR)
+                results_dir=RESULTS_DIR, output_dir=OUTPUT_DIR, targets=TARGETS_OVERRIDE,
+                merge_from=MERGE_FROM)
     if PREPARE_ONLY:
         prepare(DATASET)
+    elif MERGE_FROM is not None:
+        merge(DATASET)
     else:
         main()

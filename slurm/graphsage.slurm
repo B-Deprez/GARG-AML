@@ -8,9 +8,11 @@
 #          measure CSVs: feeding it GARG-AML scores, block densities or block
 #          sizes would destroy the ablation.
 # SUBMIT   slurm/submit.sh slurm/graphsage.slurm HI-Small
-# ARRAY    None. One dataset per invocation by design. To shard the two feature
-#          configs across two jobs, set GARGAML_CONFIGS=topology and
-#          GARGAML_CONFIGS=attributes in separate submissions.
+# ARRAY    None. One dataset per invocation by design. The full sweep runs as
+#          one job per target (GARGAML_TARGETS, each with its own
+#          GARGAML_OUTPUT_DIR), merged afterwards with GARGAML_MERGE_FROM --
+#          see slurm/README.md. GARGAML_CONFIGS shards the two feature configs
+#          the same way.
 # PREREQ   The tree job for the same dataset name -- it writes
 #          <dataset>_folds.csv, which this job reads for its fold count and fold
 #          membership. It has no fold count of its own, so whatever the tree ran
@@ -57,14 +59,16 @@
 #          rebuilds the labels itself and runs out of memory. Its num_workers=4 assumes
 #          pyg-lib is present (see the script's docstring); without it the
 #          neighbour sampler is slower but not heavier.
-# TIME     16:00:00 for HI-Small: the sweep is 4 cut-offs x 3 targets x 5 folds
-#          x 2 configs = 120 fits, and a GNN fit is minutes where a tree is
-#          seconds. That sweep is a logged reduction of the full grid, not the
-#          tree models' full cut-off x target sweep -- do not assume parity.
+# TIME     16:00:00 for one target. The full sweep -- the tree models' grid,
+#          540 fits on HI-Small and 360 on LI-Large -- does not fit one job,
+#          which is why it runs one target per job. One target is 60 fits on
+#          HI-Small and 40 on LI-Large; at LI-Large's measured 17-23 s/epoch
+#          the worst case, every fit at the 50-epoch cap, is ~11 h. Early
+#          stopping and zero-positive skips make most jobs far shorter.
 
 #SBATCH --job-name=gargaml_graphsage
-#SBATCH --output=slurm/logs/gargaml_graphsage.out
-#SBATCH --error=slurm/logs/gargaml_graphsage.err
+#SBATCH --output=slurm/logs/gargaml_graphsage_%j.out
+#SBATCH --error=slurm/logs/gargaml_graphsage_%j.err
 
 #SBATCH --cluster=wice
 #SBATCH --partition=gpu_a100
@@ -97,7 +101,7 @@ export GARGAML_RESULTS_DIR="${GARGAML_RESULTS_DIR:-results-revision}"
 # Fail immediately rather than training on CPU with a GPU allocated.
 export GARGAML_REQUIRE_GPU=1
 
-echo "[$(date)] graphsage: dataset=$GARGAML_DATASET configs=${GARGAML_CONFIGS:-default(topology,attributes)} require_gpu=$GARGAML_REQUIRE_GPU checkpoints=${GARGAML_CHECKPOINT_DIR:-\$VSC_SCRATCH/gargaml/checkpoints} results_dir=$GARGAML_RESULTS_DIR"
+echo "[$(date)] graphsage: dataset=$GARGAML_DATASET configs=${GARGAML_CONFIGS:-default(topology,attributes)} targets=${GARGAML_TARGETS:-default} output_dir=${GARGAML_OUTPUT_DIR:-$GARGAML_RESULTS_DIR} require_gpu=$GARGAML_REQUIRE_GPU checkpoints=${GARGAML_CHECKPOINT_DIR:-\$VSC_SCRATCH/gargaml/checkpoints} results_dir=$GARGAML_RESULTS_DIR"
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
 
 python -u scripts/graphsage_baseline.py
