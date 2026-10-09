@@ -479,6 +479,8 @@ scripts/                      # runnable entry points — run from repo ROOT
   partial_observability.py    # task 5 appendix: pure GARG-AML score, full graph vs
                               #   single-bank view, no Louvain, clients only
   distribution_scores.py      # score-distribution analysis/plots
+  status.py                   # what has run / is stale / is ready or waiting, per results
+                              #   dir; reads each plan out of the scripts' own constants
   test_parallel.py            # multiprocessing sanity check, not part of the pipeline
   nbstrip.py                  # notebook-output clean filter (task 13), not part of the
                               #   pipeline; stdlib only, see §8

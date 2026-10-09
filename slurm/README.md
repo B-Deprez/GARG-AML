@@ -350,6 +350,39 @@ Two dependencies are real and verified in the code:
 
 ---
 
+## Checking progress
+
+`scripts/status.py` answers "what has run, what has not, and what cannot run
+yet" in one report. It reads the results directory, judges completeness against
+the plan the scripts themselves declare (dataset lists, targets, the 66-dataset
+synthetic grid, GraphSAGE's per-target sweep), and for each experiment prints
+`done`, `part`, `STALE`, `ready` (nothing on disk, every input present) or
+`wait` (an input is missing, and which one). It also reads `squeue` and marks
+what is already running or pending, and ends with the `sbatch` line for
+everything ready.
+
+```bash
+# On a login node, no job needed:
+source activate gargaml
+python scripts/status.py --dir results-revision
+
+# As a job (writes results-revision/status.csv; read slurm/logs/gargaml_status.out):
+slurm/submit.sh slurm/status.slurm all
+STATUS_ARGS="--long" slurm/submit.sh slurm/status.slurm all
+```
+
+`STALE` is judged by value, not by file date: directed measures with
+`size_12 == 0 and measure_12 == 1` rows (computed before `c5fba86`), a
+single-split result file, a file with no 0.0 cut-off row, and a GraphSAGE
+`attributes` run whose feature schema still lists the timing features. A result
+built on a stale input is stale too. Name your jobs with `slurm/submit.sh`: it
+names a job `<script>_<dataset>`, which is how the report places a queued job
+against its experiment; a bare `sbatch` is only placed when it is an array job.
+Run it on both `results/` and `results-revision/` (`--dir results
+results-revision`) when unsure which directory holds a result.
+
+---
+
 ## Recovery
 
 **Ground truth is what got written, not the exit code** — a task can exit 0
