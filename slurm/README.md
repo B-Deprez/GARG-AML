@@ -203,11 +203,11 @@ slurm/submit.sh slurm/collect.slurm all
   # validated cells, higher cap
   GARGAML_EPOCHS=200 GARGAML_CONFIGS=attributes GARGAML_CUTOFFS=0.0,0.1,0.5 \
   GARGAML_OUTPUT_DIR=results-revision/graphsage_attr_ep200 \
-    slurm/submit.sh slurm/graphsage.slurm LI-Large --time=16:00:00 --mem=120g
+    slurm/submit.sh slurm/graphsage.slurm LI-Large --time=16:00:00 --mem=48g
   # unvalidated cut-off, same fixed 50 epochs as the topology config
   GARGAML_CONFIGS=attributes GARGAML_CUTOFFS=0.9 \
   GARGAML_OUTPUT_DIR=results-revision/graphsage_attr_0.9 \
-    slurm/submit.sh slurm/graphsage.slurm LI-Large --time=06:00:00 --mem=120g
+    slurm/submit.sh slurm/graphsage.slurm LI-Large --time=06:00:00 --mem=48g
   ```
   Needs the wave-3 caches and folds in `results-revision/`. A fit took ~1,165 s
   per 50 epochs (~23 s/epoch); 15 fits at a 200-epoch cap are at most ~19 h, but
@@ -216,7 +216,9 @@ slurm/submit.sh slurm/collect.slurm all
   raise it. Report the 0.9 cells as unvalidated. **Cold preprocessing time:** the
   prep CSV's `attributes` seconds (1,930 s) still include parsing every timestamp,
   which no longer happens. To re-measure, delete `LI-Large_graphsage_x_attributes.pt`
-  and run `slurm/graphsage_prep.slurm LI-Large`.
+  and run the prep job with the LI-Large overrides -- the script's 64g default is
+  sized for HI-Small and runs out of memory here:
+  `slurm/submit.sh slurm/graphsage_prep.slurm LI-Large --time=06:00:00 --mem=200g`.
 - **The wave-2 gate is the one that matters.** A tree job that starts before a
   measure file exists skips that direction and still exits 0.
 - **GraphSAGE's preprocessing time is a cache load on LI-Large.** The GPU job
@@ -260,23 +262,28 @@ slurm/submit.sh slurm/graphsage_prep.slurm HI-Small
 
 # --- Wave B: once HI-Small_graphsage_prep.csv exists (minutes) --------------
 ls -lh results-revision/HI-Small_graphsage_*
-# Keep the outputs of the earlier LI-Large "Is Laundering"-only run: the
-# merge in wave C overwrites them.
-mkdir -p results-revision/graphsage_before_full
-cp results-revision/LI-Large_graphsage_{tidy,runs,summary}.csv \
-   results-revision/LI-Large_undirected_graphsage*_metrics.csv \
-   results-revision/LI-Large_*_graphsage_undirected_*combined.csv results-revision/graphsage_before_full/
-# A fresh checkpoint directory: that earlier run left checkpoints whose
+# Delete the LI-Large GraphSAGE outputs of earlier runs (the Is-Laundering-only
+# run, and the first full attempt, which ran every target in every job and
+# left a mixed set at the top level). load_metrics reads
+# results-revision/*_metrics.csv, so a stale one would be counted.
+rm -fv results-revision/LI-Large_graphsage_{tidy,runs,summary}.csv \
+       results-revision/LI-Large_undirected_graphsage*_metrics.csv \
+       results-revision/LI-Large_undirected_graphsage*_feature_schema.csv \
+       results-revision/LI-Large_*_graphsage_undirected_graphsage*combined.csv
+rm -rfv results-revision/graphsage_parts/LI-Large_*
+# A fresh checkpoint directory: earlier runs left checkpoints whose
 # signature matches, and resuming from one reports only the resumed epochs
-# as fit_seconds.
+# as fit_seconds. Remove LI-Large's from both directories.
 ckpt=$VSC_SCRATCH/gargaml/checkpoints_full
+rm -fv $VSC_SCRATCH/gargaml/checkpoints/LI-Large_* $ckpt/LI-Large_*
 for t in "Is Laundering" FAN-OUT FAN-IN GATHER-SCATTER SCATTER-GATHER CYCLE RANDOM BIPARTITE STACK; do
   tag=${t// /-}
   for ds in HI-Small LI-Large; do
-    mem=64g; [ "$ds" = LI-Large ] && mem=120g
-    GARGAML_TARGETS="$t" GARGAML_CHECKPOINT_DIR=$ckpt \
-    GARGAML_OUTPUT_DIR=results-revision/graphsage_parts/${ds}_$tag \
-      slurm/submit.sh slurm/graphsage.slurm $ds --mem=$mem \
+    mem=64g; [ "$ds" = LI-Large ] && mem=48g
+    # --export, not a variable prefix: a first attempt that relied on the
+    # environment reaching the job ran all nine targets in every job.
+    slurm/submit.sh slurm/graphsage.slurm $ds --mem=$mem \
+      --export="ALL,GARGAML_TARGETS=$t,GARGAML_CHECKPOINT_DIR=$ckpt,GARGAML_OUTPUT_DIR=results-revision/graphsage_parts/${ds}_$tag" \
         --output=slurm/logs/graphsage_${ds}_${tag}_%j.out \
         --error=slurm/logs/graphsage_${ds}_${tag}_%j.err
   done
@@ -297,9 +304,16 @@ done
   HI-Small and 40 on LI-Large; at LI-Large's measured 17-23 s/epoch, every
   fit running to the 50-epoch cap would take ~11 h. Most do not: validated
   cells early-stop, and folds with no positives are skipped.
-- **Memory.** LI-Large needs `--mem=120g`, the most `gpu_a100` allows per
-  GPU. That is enough only because its caches already exist; without them the
-  job rebuilds the labels (~167 GiB) and runs out of memory.
+- **Memory.** LI-Large runs at `--mem=48g`: a cached run peaked at 12.4 GB
+  (`peak_host_mb` in `LI-Large_graphsage_runs.csv`). That holds only because its
+  caches already exist; without them the job rebuilds the labels (~167 GiB) and
+  runs out of memory at any size the partition allows (126,000 MiB). On wice the
+  cpu count follows the memory, and the job needs 5, so stay above ~40g. If a
+  target dies out of memory, resubmit just that one with `--mem=80g`.
+- **Check the variables arrived.** The first line of each job's `.out` must say
+  `targets=<that one target>`; `targets=default` means the job is running the
+  whole sweep -- `scancel` it. Several jobs sharing one target list also share
+  checkpoints and outputs, which is what corrupted the first attempt.
 - **The merge is the only output that counts.** `load_metrics` reads only the
   top level of `results-revision/`, so neither `VisualisationResults.ipynb`
   nor `build_tables.py` sees `graphsage_parts/` until wave C has run.

@@ -48,17 +48,23 @@
 #          built from a 475 MB CSV read whole by pandas. The host-side peak is
 #          dominated by that build, not by the tensors. 64g is headroom.
 #          LI-Large: run slurm/graphsage_prep.slurm first, then
-#          --time=24:00:00 --mem=120g. 200g cannot be had on this partition:
+#          --time=16:00:00 --mem=48g. 200g cannot be had on this partition:
 #          gpu_a100 allows at most 126,000 MiB and 18 cores per GPU, and sbatch
 #          rejects more. What needed it was the label build -- 166.6 GiB MaxRSS
 #          (label_distribution.py's identical call, job 62206918) -- which the
 #          prep job does on a CPU node. With its caches this job loads
 #          edge_index (at most ~5.6 GB int64, copied once into a tensor), the
-#          features (2,054,390 x ~20 x 4 = ~164 MB) and the folds file; 120g
-#          is headroom over that, not a measured peak. Without the caches it
-#          rebuilds the labels itself and runs out of memory. Its num_workers=4 assumes
-#          pyg-lib is present (see the script's docstring); without it the
-#          neighbour sampler is slower but not heavier.
+#          features (2,054,390 x ~20 x 4 = ~164 MB) and the folds file. The
+#          measured host peak of a cached run was 12.4 GB (peak_host_mb in
+#          LI-Large_graphsage_runs.csv), so 48g is ~4x that; 120g, the first
+#          choice, was an unmeasured guess. On wice the cpu count follows the
+#          memory share (120g gave 18 cores, 48g gives ~7), and the job needs 5
+#          (4 loader workers + the main process), so do not go below ~40g.
+#          Check sacct's MaxRSS after the first job and raise it for a target
+#          that dies with an out-of-memory error. Without the caches it
+#          rebuilds the labels itself and runs out of memory at any size. Its
+#          num_workers=4 assumes pyg-lib is present (see the script's
+#          docstring); without it the neighbour sampler is slower but not heavier.
 # TIME     16:00:00 for one target. The full sweep -- the tree models' grid,
 #          540 fits on HI-Small and 360 on LI-Large -- does not fit one job,
 #          which is why it runs one target per job. One target is 60 fits on
