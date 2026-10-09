@@ -41,7 +41,9 @@ pipeline by construction. Both produce the same node set and edge count.
 
 import hashlib
 import os
+import pickle
 import resource
+import socket
 import sys
 import time
 
@@ -157,6 +159,29 @@ def _structure_from_networkx(path, banks=None):
     return data.edge_index.numpy(), node_order
 
 
+def atomic_torch_save(obj, path):
+    """``torch.save`` that never leaves a partial file at ``path``.
+
+    Writes to a temporary file in the same directory (so the rename stays on one
+    filesystem), flushes it to disk, then ``os.replace``s it over ``path`` -- a
+    reader sees the old file or the new one, never half of either. The temporary
+    name carries host and pid because the per-target jobs run on different nodes
+    with a shared checkpoint directory. A job killed mid-write leaves only a
+    ``*.tmp.*`` file, never a corrupt checkpoint.
+    """
+    tmp = path+".tmp."+socket.gethostname()+"."+str(os.getpid())
+    try:
+        with open(tmp, "wb") as handle:
+            torch.save(obj, handle)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        raise
+
+
 def graph_cache_paths(dataset, config, results_dir="results"):
     """The structure and feature cache files ``build_graph_data`` reads for ``config``.
 
@@ -201,8 +226,8 @@ def build_graph_structure(dataset, results_dir="results", backend="pandas", cach
     degree = np.bincount(edge_index[0], minlength=len(node_order)).astype(np.float32)
 
     if cache:
-        torch.save({"edge_index": edge_index, "node_order": node_order,
-                    "degree": degree}, cache_path)
+        atomic_torch_save({"edge_index": edge_index, "node_order": node_order,
+                           "degree": degree}, cache_path)
 
     return edge_index, node_order, degree
 
@@ -338,7 +363,7 @@ def build_features(dataset, node_order, degree, config, results_dir="results", c
             # Cached with the timing features: drop those columns, keep the rest.
             keep = [_LEGACY_ATTRIBUTE_COLUMNS.index(c) for c in expected]
             x = x[:, keep]
-            torch.save(x, cache_path)
+            atomic_torch_save(x, cache_path)
             return x
         raise ValueError(cache_path+" has "+str(x.shape[1])+" columns, expected "
                          +str(len(expected))+" for config "+repr(config)
@@ -354,7 +379,7 @@ def build_features(dataset, node_order, degree, config, results_dir="results", c
     x = standardise(frame)
 
     if cache:
-        torch.save(x, cache_path)
+        atomic_torch_save(x, cache_path)
 
     return x
 
@@ -604,8 +629,19 @@ def train_fold(data, train_mask, y, device, epochs=50, patience=5, hidden_channe
     start_epoch, best_ap, best_epoch, best_state, stale = 0, -np.inf, -1, None, 0
 
     if checkpoint_path and resume and os.path.exists(checkpoint_path):
-        checkpoint = torch.load(checkpoint_path, weights_only=False)
-        if checkpoint.get("signature") != signature:
+        try:
+            checkpoint = torch.load(checkpoint_path, weights_only=False)
+        except (RuntimeError, EOFError, pickle.UnpicklingError) as err:
+            # Unreadable: left by a version that saved non-atomically, or damaged
+            # on disk. Atomic saves cannot produce one, so restarting this fold
+            # is safe -- and better than losing the whole job to it.
+            if verbose:
+                print("    ignoring unreadable checkpoint "+checkpoint_path+" ("
+                      +type(err).__name__+"), starting fresh")
+            checkpoint = None
+        if checkpoint is None:
+            pass
+        elif checkpoint.get("signature") != signature:
             if verbose:
                 print("    ignoring "+checkpoint_path+": trained under different "
                       "settings or on a different fold, labels or features, "
@@ -652,11 +688,11 @@ def train_fold(data, train_mask, y, device, epochs=50, patience=5, hidden_channe
                       +"  val AUC-PR "+format(val_ap, ".4f")+("  *" if improved else ""))
 
         if checkpoint_path:
-            torch.save({"epoch": epoch, "model_state": model.state_dict(),
-                        "optimizer_state": optimizer.state_dict(),
-                        "best_ap": best_ap, "best_epoch": best_epoch,
-                        "best_state": best_state, "stale": stale,
-                        "signature": signature}, checkpoint_path)
+            atomic_torch_save({"epoch": epoch, "model_state": model.state_dict(),
+                               "optimizer_state": optimizer.state_dict(),
+                               "best_ap": best_ap, "best_epoch": best_epoch,
+                               "best_state": best_state, "stale": stale,
+                               "signature": signature}, checkpoint_path)
 
         if val_mask is not None and stale >= patience:
             if verbose:
