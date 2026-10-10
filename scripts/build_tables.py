@@ -286,11 +286,14 @@ def build_dataset(df, dataset, written):
             results_dir=RESULTS_DIR)
         print("  variance ("+metric+"): "+str(table.shape))
 
-    costs = cost_table(df, dataset, n_folds=N_FOLDS)
+    costs = cost_table(df, dataset)
     if not costs.empty:
         written += write_table(
             costs, f"cost_{dataset}",
-            caption=(f"Training and inference cost on {dataset}. GARG-AML has "
+            caption=(f"Training and inference cost on {dataset}, per fit over "
+                     "every cut-off, target and fold of the sweep (the fits "
+                     "column counts them): mean $\\pm$ standard deviation, "
+                     "except peak memory, which is the maximum. GARG-AML has "
                      "no fit stage, which is why fit time is reported apart "
                      "from preprocessing and inference."),
             label=f"tab:cost-{dataset.lower()}",

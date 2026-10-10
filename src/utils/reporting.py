@@ -90,6 +90,17 @@ AT_K_METRICS = ["P@K", "R@K", "lift@K", "TP@K", "ties@K"]
 COST_METRICS = ["fit_seconds", "infer_seconds", "peak_host_mb", "peak_gpu_mb",
                 "epochs_run", "epochs_to_best"]
 
+# How cost_table reduces each metric over the fits it covers. A peak is the
+# resource a job has to be provisioned for, so it is the maximum over fits; an
+# average of peaks describes no job. Everything else is a per-fit quantity and
+# is reported as mean +/- std.
+PEAK_METRICS = ("peak_host_mb", "peak_gpu_mb")
+
+# Decimals per cost metric. One decimal would print a full-graph inference pass
+# (~0.01 s on HI-Small) as 0.0 and a memory peak with false precision.
+COST_DIGITS = {"fit_seconds": 1, "infer_seconds": 2, "peak_host_mb": 0,
+               "peak_gpu_mb": 0, "epochs_run": 1, "epochs_to_best": 1}
+
 # Tables 10-11's slice of the grid; the cut-off half is HEADLINE_CUTOFFS from
 # src/utils/evaluation.py, so the reported slice and the sweep the expensive
 # runs execute cannot drift apart.
@@ -502,7 +513,7 @@ def ties_table(df, dataset, cutoff, target, **kwargs):
     return alert_table(df, dataset, cutoff, target, metric="ties@K", **kwargs)
 
 
-def cost_table(df, dataset, metrics=None, n_folds=None, latex=True):
+def cost_table(df, dataset, metrics=None, cutoff=None, target=None, latex=True):
     """The scalability half: fit / inference time and peak memory.
 
     Only models that record costs appear, which is GraphSAGE. GARG-AML's
@@ -510,18 +521,62 @@ def cost_table(df, dataset, metrics=None, n_folds=None, latex=True):
     ``results/time_results_*.txt`` in a different format and are not joined
     here; fit time is reported separately because GARG-AML's is zero, which
     a combined wall-clock number would hide.
+
+    One row per model variant, reduced over **every fit it has** -- all
+    cut-offs, targets and folds of the sweep, or only the ``cutoff`` /
+    ``target`` given. The ``fits`` column says how many that is. Times and
+    epoch counts are mean +/- std per fit; peak memory is the maximum over
+    fits (``PEAK_METRICS``), which the column header says. A cost is not a cell
+    of the cut-off x target grid, so it is not pivoted over that grid: doing so
+    leaves several cells per variant, and keeping one of them would report an
+    arbitrary fit's cost as the model's.
+
+    Only fits that ran (``status == "ok"``, a per-fold or single-split row, a
+    recorded value) are counted; a skipped cell has no cost, not a zero one.
     """
     metrics = COST_METRICS if metrics is None else metrics
 
-    sub = df[(df["dataset"] == dataset) & df["metric"].isin(metrics)]
+    sub = model_rows(df)
+    sub = sub[(sub["dataset"] == dataset) & sub["metric"].isin(metrics)
+              & (sub["status"] == "ok") & (sub["fold"] != -1) & sub["value"].notna()]
+    if cutoff is not None:
+        sub = sub[sub["cutoff"] == cutoff]
+    if target is not None:
+        sub = sub[sub["target"] == target]
     if sub.empty:
         return pd.DataFrame()
 
-    summary = summarise(sub)
-    summary["variant"] = [
-        model_label(m, f) for m, f in zip(summary["model"], summary["features"])]
-    return _pivot(summary, index="variant", columns="metric", n_folds=n_folds,
-                  digits=1, bold_max=False, latex=latex)
+    # A variant with costs under both directions would otherwise be pooled into
+    # one row, so the direction joins the label where the labels would clash.
+    keys = ["model", "features", "direction"]
+    labels = {key: model_label(key[0], key[1])
+              for key in map(tuple, sub[keys].drop_duplicates().to_numpy())}
+    clashes = pd.Series(list(labels.values())).value_counts()
+    labels = {key: label if clashes[label] == 1 else f"{label} ({key[2]})"
+              for key, label in labels.items()}
+
+    def header(metric):
+        return f"{metric} (max)" if metric in PEAK_METRICS else metric
+
+    rows = {}
+    for key, group in sorted(sub.groupby(keys, dropna=False),
+                             key=lambda item: (_model_sort_key(item[0][0]), labels[item[0]])):
+        row = {"fits": str(group[["cutoff", "target", "fold"]].drop_duplicates().shape[0])}
+        for metric in metrics:
+            values = group.loc[group["metric"] == metric, "value"]
+            digits = COST_DIGITS.get(metric, 1)
+            if values.empty:
+                row[header(metric)] = "--"
+            elif metric in PEAK_METRICS:
+                row[header(metric)] = format_cell(values.max(), digits=digits, latex=latex)
+            else:
+                row[header(metric)] = format_cell(values.mean(), values.std(),
+                                                  digits=digits, latex=latex)
+        rows[labels[key]] = row
+
+    table = pd.DataFrame.from_dict(rows, orient="index")
+    table.index.name = "variant"
+    return table
 
 
 def louvain_setting(df):
