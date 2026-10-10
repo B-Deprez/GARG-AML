@@ -72,7 +72,8 @@ wave-by-wave procedure for LI-Large.
 | Edges severed by the Louvain filter | `notebooks/LouvainEdgeSeverance.ipynb` | inline table |
 | Edges removed per pre-processing setting, and the laundering edges among them | `notebooks/LouvainEdgeSeverance.ipynb` | `results/preprocessing_severance.csv` (one row per dataset and setting: edges removed, laundering edges removed, and the laundering share within what was removed) |
 | Laundering patterns destroyed by the Louvain step | `scripts/pattern_splitting.py` | `results/<dataset>_pattern_splitting.csv` (one row per laundering attempt and resolution: communities spanned, edge survival, 2-path survival), `..._summary.csv` by pattern type, and the pooled `results/pattern_splitting_summary.csv` |
-| Pre-processing sensitivity sweep (resolution, no Louvain at all, and hub removal) | `scripts/gargaml_undirected.py`, `scripts/gargaml_directed.py`, `scripts/gargaml_tree.py`, run on the `_res<r>` / `_nolouvain` / `_hubs<k>` dataset names | `results/louvain_severance.csv` (edges severed per dataset and setting) plus the usual per-dataset measure and metric files under those names |
+| Pre-processing sensitivity sweep (resolution and no Louvain at all): the pure GARG-AML score, directed beside undirected -- no model is fitted on these arms | `scripts/gargaml_undirected.py` and `scripts/gargaml_directed.py` on the `_res<r>` / `_nolouvain` dataset names, then `scripts/distribution_scores.py` with `GARGAML_DATASET=louvain_sweep` | `results/louvain_severance.csv` (edges severed per dataset and setting), `results/<dataset>_<direction>_base_metrics.csv` per arm (full-population rows, no fold column), and `results/table_sweep_score_<dataset>_<metric>.tex` from `scripts/build_tables.py` |
+| Hub-removal arms (`_hubs<k>`) | the same measure scripts, then `scripts/gargaml_tree.py` | the usual per-dataset measure and metric files under those names |
 | Partial-observability appendix: score on the full graph vs a bank's view | `scripts/partial_observability.py` | `results/<view>_partial_observability_accounts.csv`, `..._metrics.csv` |
 | Appendix tables and figures | `notebooks/BankObservability.ipynb` | `results/appendix_*.csv`, `results/appendix_*.pdf` |
 | Directed-vs-undirected diagnosis | `scripts/directed_diagnosis.py` | `results/<dataset>_directed_diagnosis.csv` (per node: level census, reciprocal census, five score variants), `..._summary.csv` (means by ground-truth class and structural role), `..._directed_diagnosis_metrics.csv` (each variant through the shared metrics), and the pooled `results/directed_diagnosis_{summary,metrics}.csv` |
@@ -136,7 +137,11 @@ from `results-0/` and `results-aa/`, and FlowScope's IBM tidy metrics from
   untouched. Every run prints the percentage of edges severed and stage 1
   appends it to `results/louvain_severance.csv`. The no-Louvain arm is far more
   than a slower run: the reduction is what bounds the second-order ego graphs,
-  and without it a single HI-Small node can densify to roughly 1.8 GB.
+  and without it a single HI-Small node can densify to roughly 1.8 GB. The
+  resolution sweep reports the pure score alone, directed beside undirected:
+  `slurm/submit.sh slurm/distribution_scores.slurm louvain_sweep` scores every
+  arm on the full population, and the published setting is read from its own
+  full-population row so every column is the same kind of number.
 - **Hub removal.** `HI-Small_hubs100` is the second sensitivity arm: Louvain is
   not run, and the 100 highest-degree accounts are deleted instead. The arms
   are `_hubs5` / `_hubs10` / `_hubs100`, ranked on the undirected view so the

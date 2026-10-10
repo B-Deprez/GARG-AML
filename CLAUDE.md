@@ -103,9 +103,24 @@ them already have work on disk:
   ego graphs and removing them moves the mean score by +0.0014. **Do not
   reinstate the transpose-max** on the strength of this — it closes 55 % of the
   gap but is not in the paper, and the mule failure mode survives it.
-- **Task 4** — `notebooks/LouvainEdgeSeverance.ipynb` quantifies the % of edges severed
-  on every dataset, but only at `resolution = 10`. The resolution sweep, the
-  split-pattern diagnostic and the no-Louvain run are still open.
+- **Task 4** — **the sweep compares the pure GARG-AML score only, directed against
+  undirected (decided 2026-10-10); no tree, boosting or GraphSAGE model is run on a
+  `_res<r>` / `_nolouvain` arm.** The measures for `HI-Small_res{1,5,20,50}` and
+  `HI-Small_nolouvain` are on disk; the scores come from
+  `GARGAML_DATASET=louvain_sweep python scripts/distribution_scores.py`
+  (`LOUVAIN_SWEEP` in that script), which writes full-population
+  `<arm>_<direction>_base_metrics.csv` files, and `build_tables.py` turns them into
+  `table_sweep_score_*`. Read the published setting from the *full-population* row
+  (`fold = NaN`) of `HI-Small`'s base file, not the fold mean, or the columns mix two
+  kinds of number. `scripts/status.py` treats these arms as score-only, so it shows no
+  tree or fold-partition work outstanding for them; the hub arms (`_hubs<k>`) keep
+  their tree plan. The split-pattern diagnostic is done
+  (`scripts/pattern_splitting.py`); `notebooks/LouvainEdgeSeverance.ipynb` still
+  reports % edges severed only at `resolution = 10`. **Caveat for the directed-vs-undirected
+  reading:** `community_map` runs Louvain on `G.to_undirected()` for a directed graph, so
+  the two directions can be reduced by different partitions at the same resolution
+  (measured 2026-10-05: |N1| differs on 13.9 % of HI-Small nodes); a gap between the
+  directions at one resolution is not purely a direction effect until that is fixed.
 - **Task 5** — code DONE, appendix runs in progress; full design in
   `GARG-AML_code_changes.md` §5. Two separable pieces:
 

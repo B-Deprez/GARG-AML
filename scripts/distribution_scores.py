@@ -12,8 +12,10 @@ from src.utils.evaluation import (CUT_OFFS, LEGACY_METRICS, SEED,
                                   evaluate_scores, fold_assignments, folds_path,
                                   metric_names, metric_records, nan_metrics,
                                   read_folds, write_metrics)
+from src.utils.graph_processing import strip_resolution
 from src.utils.naming import gargaml_key
 from src.utils.runtime import resolve_results_dir, select_datasets, write_csv
+from functools import lru_cache
 import pandas as pd
 import timeit
 
@@ -34,6 +36,17 @@ RESULTS_DIR = resolve_results_dir()
 # partition exists (the synthetic grid, or an IBM run with N_FOLDS = 0);
 # full-population numbers are still written either way.
 USE_FOLDS = True
+
+# The Louvain sensitivity sweep (task 4) compares the pure score alone, directed
+# against undirected, across the resolution setting; no model is fitted on its
+# arms. ``GARGAML_DATASET=louvain_sweep`` expands to these names, the way
+# ``synthetic`` stands for the synthetic grid. The published setting (plain
+# "HI-Small", resolution 10) is the sweep's own point and is not rerun here.
+# Each arm has no fold partition (gargaml_tree.py is not run on it), so it gets
+# full-population metrics only, which for an unfitted score are the pooled
+# out-of-fold numbers anyway.
+LOUVAIN_SWEEP = ["HI-Small_res1", "HI-Small_res5", "HI-Small_res20",
+                 "HI-Small_res50", "HI-Small_nolouvain"]
 
 # This file's convention for "not available" is -1, not NaN: results are
 # logged as repr()'d Python literals and read back with a bare eval() in
@@ -245,18 +258,26 @@ def _fold_records(labels_gargaml_full, y_true, folds_df, cut_off, column, contex
     return records
 
 
-def distribution_scores_IBM(dataset, results_df, str_directed, str_supervised):
-    transactions_df_extended, pattern_columns = define_ML_labels(
-        path_trans = "data/"+dataset+"_Trans.csv",
-        path_patterns = "data/"+dataset+"_Patterns.txt"
-    )
+@lru_cache(maxsize=1)
+def ibm_labels(base):
+    """Account labels of an IBM dataset, read from its transactions file.
 
+    Every pre-processing arm of a dataset ("HI-Small_res20", ...) shares the
+    labels of its base, and the sweep scores each arm in both directions, so
+    the parse of the transactions file is done once per base rather than once
+    per (arm, direction).
+    """
+    transactions_df_extended, pattern_columns = define_ML_labels(
+        path_trans = "data/"+base+"_Trans.csv",
+        path_patterns = "data/"+base+"_Patterns.txt"
+    )
     laundering_combined, _, _ = summarise_ML_labels(transactions_df_extended,pattern_columns)
-    del transactions_df_extended
-    del pattern_columns
+    return laundering_combined
+
+def distribution_scores_IBM(dataset, results_df, str_directed, str_supervised):
+    laundering_combined = ibm_labels(strip_resolution(dataset))
 
     labels_gargaml_full = laundering_combined.merge(results_df[["GARGAML"]], left_index=True, right_index=True, how="outer").fillna(-1)
-    del laundering_combined
 
     # Evaluated on every account, not on a held-out slice: this score is never
     # fit to anything (same as gargaml_IF.py, for the same reason).
@@ -321,10 +342,13 @@ def distribution_scores_IBM(dataset, results_df, str_directed, str_supervised):
             # it before the real data -- a flat list of numbers has none.
             # It then parses the whole line with line.split('_'), so an
             # extra '_' in the label text shifts every index after it.
-            with open(RESULTS_DIR+'/results_performance_IBM_'+str_directed+'.txt', 'a') as f:
-                f.write(dataset+'_'+column+'_'+str(cut_off)+' [precision, F1, AUC-ROC, AUC-PR, then '
-                        +'ranking metrics in a fixed order, see evaluation.py]: '
-                        +str(result_list)+'\n')
+            # A sweep arm's name carries an extra '_' that would shift the
+            # parse above, and its numbers live in the tidy file.
+            if strip_resolution(dataset) == dataset:
+                with open(RESULTS_DIR+'/results_performance_IBM_'+str_directed+'.txt', 'a') as f:
+                    f.write(dataset+'_'+column+'_'+str(cut_off)+' [precision, F1, AUC-ROC, AUC-PR, then '
+                            +'ranking metrics in a fixed order, see evaluation.py]: '
+                            +str(result_list)+'\n')
 
     # Tidy frame only. The base score has no
     # <dataset>_<metric>_<model>_<direction>_combined.csv matrices behind it
@@ -463,7 +487,7 @@ def general_calculation(dataset, directed, supervised, score_type):
         results_df["anomaly_score"] = results_df["anomaly_score"]*(-1)
         results_df.columns = ["GARGAML"]
 
-    if dataset in ["HI-Small", "LI-Large"]:
+    if strip_resolution(dataset) in ["HI-Small", "LI-Large"]:
         distribution_scores_IBM(dataset, results_df, str_directed, str_supervised)
 
     elif dataset[:min(9, len(dataset))] == "synthetic": #use min in case the string is shorter than 9
@@ -525,9 +549,13 @@ def benchmark_synthetic(
     print("wrote "+out_path)
 
 if __name__ == "__main__":
-    # GARGAML_DATASET=synthetic runs the 66-dataset synthetic grid instead
-    # (slurm/distribution_scores.slurm takes it as its argument).
-    datasets = select_datasets(["HI-Small", "LI-Large"])  # synthetic, HI-Small, LI-Large
+    # GARGAML_DATASET=synthetic runs the 66-dataset synthetic grid instead, and
+    # GARGAML_DATASET=louvain_sweep the Louvain arms (slurm/distribution_scores.slurm
+    # takes either as its argument).
+    selected = select_datasets(["HI-Small", "LI-Large"])  # synthetic, louvain_sweep, HI-Small, LI-Large
+    datasets = []
+    for name in selected:
+        datasets += LOUVAIN_SWEEP if name == "louvain_sweep" else [name]
     for dataset in datasets:
         for directed in [True, False]:
             supervised = True

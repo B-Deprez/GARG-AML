@@ -98,6 +98,10 @@ ts3d=$(slurm/submit.sh slurm/tree_synth.slurm 3_directed   --dependency=afterok:
 ts5u=$(slurm/submit.sh slurm/tree_synth.slurm 5_undirected --dependency=afterok:$sd1:$su1)
 ts5d=$(slurm/submit.sh slurm/tree_synth.slurm 5_directed   --dependency=afterok:$sd1:$su1)
 ts=$ts3u:$ts3d:$ts5u:$ts5d
+# The Louvain sweep reports the pure score only, directed beside undirected, so the
+# arms get no tree and no fold partition. Their stage-1 measures first (index 2,3,5,6
+# = res1/5/20/50, 8 = no Louvain; see `bash slurm/common.sh`), then one scoring job:
+lsw=$(slurm/submit.sh slurm/distribution_scores.slurm louvain_sweep)
 # The base score on the synthetic grid (both directions, one job):
 sds=$(slurm/submit.sh slurm/distribution_scores.slurm synthetic --dependency=afterok:$sd1:$su1)
 

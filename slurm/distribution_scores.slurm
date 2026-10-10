@@ -12,6 +12,11 @@
 #            sbatch slurm/distribution_scores.slurm                     # HI-Small and LI-Large
 #            slurm/submit.sh slurm/distribution_scores.slurm HI-Small   # one IBM dataset
 #            slurm/submit.sh slurm/distribution_scores.slurm synthetic  # the synthetic grid
+#            slurm/submit.sh slurm/distribution_scores.slurm louvain_sweep
+#              # the Louvain arms HI-Small_res{1,5,20,50} and HI-Small_nolouvain: the pure
+#              # score, directed beside undirected, full-population metrics, no model and
+#              # no folds file. The published setting (plain HI-Small) is the sweep's own
+#              # point and is not rerun. The transactions file is parsed once for all five.
 # ARRAY    None -- one job loops both directions over what it selected.
 # PREREQ   Stage-1 measures, and <dataset>_folds.csv if you want the per-fold
 #          rows (a missing folds file is a normal state, not an error).

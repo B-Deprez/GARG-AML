@@ -577,7 +577,8 @@ def _setting_column(value):
 
 
 def sweep_table(df, dataset, direction, metric="AUC_PR", features="full",
-                cutoffs=None, targets=None, n_folds=None, latex=True):
+                cutoffs=None, targets=None, n_folds=None, latex=True,
+                fold_mode="auto"):
     """Downstream performance against the Louvain setting.
 
     Rows are (model, pattern, cut-off); columns are the resolution, with the
@@ -589,18 +590,28 @@ def sweep_table(df, dataset, direction, metric="AUC_PR", features="full",
     here is whether the *pre-processing* choice moves the result, so varying
     the feature groups at the same time would confound two sensitivities that
     are reported separately.
+
+    ``direction=None`` keeps both directions, the row label saying which, for
+    a sweep whose point is to set them side by side. ``features="score"`` with
+    ``fold_mode="single"`` is the sweep of the pure GARG-AML score: no model
+    is fitted on a sweep arm, so an arm has only its full-population row, and
+    the published setting must be read from its full-population row too
+    (``"auto"`` would put a fold mean beside full-population values).
     """
     cutoffs = HEADLINE_CUTOFFS if cutoffs is None else cutoffs
     targets = HEADLINE_TARGETS if targets is None else targets
 
     sub = louvain_setting(model_rows(df))
-    sub = sub[(sub["base_dataset"] == dataset) & (sub["direction"] == direction)
+    sub = sub[(sub["base_dataset"] == dataset)
               & (sub["metric"] == metric) & (sub["features"] == features)
               & sub["cutoff"].isin(cutoffs) & sub["target"].isin(targets)]
+    if direction is not None:
+        sub = sub[sub["direction"] == direction]
     if sub.empty or sub["resolution"].nunique() < 2:
         return pd.DataFrame()
 
-    summary = summarise(sub, group_keys=GROUP_KEYS + ["resolution"])
+    summary = summarise(sub, group_keys=GROUP_KEYS + ["resolution"],
+                        fold_mode=fold_mode)
     summary["variant"] = [
         model_label(m, f) for m, f in zip(summary["model"], summary["features"])]
     summary = summary.sort_values(

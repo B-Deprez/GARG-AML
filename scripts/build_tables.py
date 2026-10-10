@@ -24,6 +24,10 @@ What it writes
     Fold mean +/- std, with the fold count behind each mean.
 ``table_cost_<dataset>``
     GraphSAGE fit / inference seconds and peak host and GPU memory.
+``table_sweep_score_<dataset>_<metric>``
+    The Louvain sweep of the pure GARG-AML score alone, directed beside
+    undirected, every column a full-population number. This is the sweep the
+    revision reports: no model is fitted on its arms.
 ``table_sweep_<dataset>_<direction>_<metric>``
     Downstream performance against the Louvain resolution, with the
     no-Louvain arm first. Only written once at least two settings are on
@@ -226,6 +230,35 @@ def build_sweep_tables(df, dataset, written):
             print("  sweep ("+direction+", "+metric+"): "+str(table.shape))
 
 
+def build_score_sweep_tables(df, dataset, written):
+    """The Louvain sweep of the pure GARG-AML score, directed beside undirected.
+
+    The sweep runs no model: each arm is the score alone on the full
+    population (scripts/distribution_scores.py, ``louvain_sweep``), and the
+    published setting is read from its full-population row too, so every
+    column is the same kind of number.
+    """
+    for metric in METRICS:
+        table = sweep_table(df, dataset, None, metric=metric, features="score",
+                            fold_mode="single", n_folds=N_FOLDS)
+        if table.empty:
+            continue
+        written += write_table(
+            table, f"sweep_score_{dataset}_{metric}",
+            caption=(f"Sensitivity of the {metric.replace('_', '-')} of the "
+                     f"GARG-AML score itself to the Louvain pre-processing, "
+                     f"{dataset}, directed beside undirected. No model is "
+                     "fitted: every column is the score on the full population. "
+                     "Columns run from no reduction at all to the most "
+                     "aggressive setting; \\emph{r=10} is the published choice."),
+            label=f"tab:sweep-score-{dataset.lower()}-{metric.lower()}",
+            note=("Cells are deliberately not bolded: the question is whether "
+                  "the choice of resolution moves the result, not which "
+                  "resolution to select on the evaluation data."),
+            wide=True, results_dir=RESULTS_DIR)
+        print("  score sweep ("+metric+"): "+str(table.shape))
+
+
 def build_dataset(df, dataset, written):
     if df[df["dataset"] == dataset].empty:
         print("\n### "+dataset+" -- SKIPPED: no tidy metrics on disk ###")
@@ -236,6 +269,7 @@ def build_dataset(df, dataset, written):
     build_ablation_tables(df, dataset, written)
     build_alert_tables(df, dataset, written)
     build_sweep_tables(df, dataset, written)
+    build_score_sweep_tables(df, dataset, written)
 
     for metric in METRICS:
         table = variance_table(df, dataset, metric=metric, n_folds=N_FOLDS)

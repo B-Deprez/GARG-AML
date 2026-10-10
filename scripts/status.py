@@ -73,6 +73,7 @@ sys.path.append("./")
 
 from src.utils.evaluation import CUT_OFFS, HEADLINE_CUTOFFS
 from src.utils.features import FEATURE_CONFIGS, config_suffix, is_direction_free
+from src.utils.graph_processing import parse_hubs, strip_resolution
 from src.utils.runtime import resolve_results_dir
 
 DIRECTIONS = ["undirected", "directed"]
@@ -88,6 +89,10 @@ IF_DATASET = "HI-Small"
 # Expected to be infeasible (slurm/README.md, Known gaps): reported, but never
 # counted against the run.
 OPTIONAL_DATASETS = {"LI-Large_nolouvain"}
+
+# The one `slurm/distribution_scores.slurm` argument that runs every score-only
+# arm in a single job (scripts/distribution_scores.py, LOUVAIN_SWEEP).
+SWEEP_JOB = "louvain_sweep"
 
 # Stage 1 cost per synthetic size tier, from slurm/README.md's submission order.
 SYNTH_COST = {100: ("00:30:00", "8g"), 10000: ("02:00:00", "16g"),
@@ -203,6 +208,7 @@ class Unit:
     family: str = ""                 # slurm script basename, for the queue overlay
     dataset: str = None
     indices: frozenset = frozenset()
+    groups: tuple = ()               # extra job names (the dataset part) that run this unit
     state: str = ""
     waiting_on: tuple = ()
     jobs: tuple = ()
@@ -385,6 +391,15 @@ def file_unit(r, key, label, files, group="extra", hint="", **kwargs):
 # IBM datasets
 # ---------------------------------------------------------------------------
 
+def is_score_only(dataset):
+    """A Louvain-sweep arm (``_res<r>``, ``_nolouvain``): the pure score is compared, no model fitted.
+
+    Hub removal is the other pre-processing arm and keeps its tree plan, and a
+    bank view carries its own bank token, so neither counts.
+    """
+    return strip_resolution(dataset) != dataset and parse_hubs(dataset) is None
+
+
 def big(dataset):
     return " --time=16:00:00 --mem=200g" if dataset.startswith("LI-Large") else ""
 
@@ -436,6 +451,8 @@ def add_measures(r):
 def add_folds(r):
     """The fold partition the tree job writes; GraphSAGE and FlowScope read it."""
     for i, dataset in enumerate(r.plan.ibm):
+        if is_score_only(dataset):
+            continue                  # no model, so no partition to share
         ids = r.folds(dataset)
         status = "DONE" if ids else "MISSING"
         r.add(Unit(key="folds:"+dataset, label="fold partition "+dataset, group="ibm",
@@ -457,6 +474,8 @@ def tree_sections(direction):
 
 def add_tree(r):
     for i, dataset in enumerate(r.plan.ibm):
+        if is_score_only(dataset):
+            continue
         statuses, reasons, notes, cols, taints = [], {}, [], {}, {}
         for direction in DIRECTIONS:
             col = "tree-D" if direction == "directed" else "tree-U"
@@ -491,25 +510,33 @@ def add_tree(r):
 
 
 def add_base_scores(r):
-    """The base GARG-AML score through the shared metrics, per direction."""
-    for dataset in CORE_DATASETS:
+    """The base GARG-AML score through the shared metrics, per direction.
+
+    The core datasets are scored per fold and pooled. A Louvain-sweep arm has
+    no fold partition and fits nothing, so it gets full-population metrics
+    only, and one job runs all of them (``SWEEP_JOB``).
+    """
+    arms = [d for d in r.plan.ibm if is_score_only(d) and d not in OPTIONAL_DATASETS]
+    for dataset in CORE_DATASETS + arms:
+        core = dataset in CORE_DATASETS
         statuses, problems, notes, cols = [], [], [], {}
         for direction in DIRECTIONS:
             status, why, tidy = r.section(dataset+"_"+direction+"_base_metrics.csv", r.plan.targets,
-                                          dataset=dataset)
+                                          dataset=dataset if core else None, cv=core)
             statuses.append(status)
             cols["base-D" if direction == "directed" else "base-U"] = CELL[status]
             if status != "DONE":
                 problems.append(direction+": "+"; ".join(why))
             if tidy:
                 notes.append(direction+": "+describe(tidy))
+        needs = ("meas:"+dataset+":directed", "meas:"+dataset+":undirected")
         r.add(Unit(key="base:"+dataset, label="base score "+dataset, group="ibm",
                    status=combine(statuses), detail="; ".join(problems) if combine(statuses) != "DONE" else "",
-                   note="\n".join(notes),
-                   needs=("meas:"+dataset+":directed", "meas:"+dataset+":undirected", "folds:"+dataset),
+                   note="\n".join(notes), needs=needs+(("folds:"+dataset,) if core else ()),
                    taints={"base-D": ("meas:"+dataset+":directed",)},
-                   cmd="slurm/submit.sh slurm/distribution_scores.slurm "+dataset+big(dataset),
-                   cols=cols, family="distribution_scores", dataset=dataset))
+                   cmd=("slurm/submit.sh slurm/distribution_scores.slurm "+(dataset+big(dataset) if core else SWEEP_JOB)),
+                   cols=cols, family="distribution_scores", dataset=dataset,
+                   groups=() if core else (SWEEP_JOB,)))
 
 
 def add_isolation_forest(r):
@@ -846,7 +873,7 @@ def job_matches(job, unit):
     if not job.family or job.family != unit.family:
         return False
     if job.dataset is not None:
-        return job.dataset == unit.dataset
+        return job.dataset == unit.dataset or job.dataset in unit.groups
     if job.array is not None:
         return bool(unit.indices & job.array)
     return True
@@ -997,6 +1024,7 @@ def render(r, jobs, queue_note, long=False, colour=False):
             continue
         printed = True
         out.append("\n"+title+":")
+        seen = set()
         for u in group:
             line = "  "+u.label
             if u.jobs:
@@ -1007,7 +1035,9 @@ def render(r, jobs, queue_note, long=False, colour=False):
                 line += "   - "+u.detail
             out.append(line)
             if state in ("READY", "PARTIAL", "STALE") and u.cmd:
-                out.extend("      "+cmd_line for cmd_line in u.cmd.split("\n"))
+                out.extend("      "+(cmd_line if cmd_line not in seen else "(same job as above)")
+                           for cmd_line in u.cmd.split("\n"))
+                seen.update(u.cmd.split("\n"))
     optional = [u for u in r.units if u.optional and u.state not in ("DONE", "NA")]
     if optional:
         printed = True
