@@ -28,7 +28,12 @@
 #          the last fold, so a wall-time kill loses the metrics of every
 #          completed fit while keeping their checkpoints. Size --time to finish
 #          the whole sweep; do not plan on a restart to collect the metrics.
-# GPU      One GPU, and --nodes=1 explicitly: wice's GPU partitions reject a
+#          fit_seconds is the whole fit's training time however many jobs it
+#          took (the checkpoint carries it), and resumed_from_epoch > 0 in the
+#          results marks a fit that was resumed. A checkpoint is only resumed
+#          under identical settings, patience and epoch cap included, and one
+#          written before CHECKPOINT_VERSION 2 is ignored and retrained.
+# GPU     One GPU, and --nodes=1 explicitly: wice's GPU partitions reject a
 #          submission that gives no node count, unlike the batch partition
 #          every other job here uses.
 #          A 2-layer GraphSAGE with a small hidden dimension is one

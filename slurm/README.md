@@ -275,9 +275,11 @@ rm -fv results-revision/LI-Large_graphsage_{tidy,runs,summary}.csv \
        results-revision/LI-Large_undirected_graphsage*_feature_schema.csv \
        results-revision/LI-Large_*_graphsage_undirected_graphsage*combined.csv
 rm -rfv results-revision/graphsage_parts/LI-Large_*
-# A fresh checkpoint directory: earlier runs left checkpoints whose
-# signature matches, and resuming from one reports only the resumed epochs
-# as fit_seconds. Remove LI-Large's from both directories.
+# Earlier runs left checkpoints that the old code resumed from, reporting only
+# the resumed epochs as fit_seconds. Since CHECKPOINT_VERSION 2 train_fold
+# ignores them (and times a resumed fit in full), so this clean-up is no longer
+# needed for correctness; it only frees scratch. Remove LI-Large's from both
+# directories.
 ckpt=$VSC_SCRATCH/gargaml/checkpoints_full
 rm -fv $VSC_SCRATCH/gargaml/checkpoints/LI-Large_* $ckpt/LI-Large_*
 for t in "Is Laundering" FAN-OUT FAN-IN GATHER-SCATTER SCATTER-GATHER CYCLE RANDOM BIPARTITE STACK; do
@@ -415,7 +417,12 @@ finishes, so a wall-time kill loses only the section in progress — but nothing
 skips finished sections, so a resubmission refits all of them. GraphSAGE's
 metric writers run after the loops, not inside them: it checkpoints every epoch
 and resumes mid-fold, but a wall-time kill still loses the metrics of every
-completed fit while keeping their checkpoints. Size `--time` to finish.
+completed fit while keeping their checkpoints. Size `--time` to finish. A
+resumed fit still reports its full training time (`fit_seconds` is carried in the
+checkpoint), and `resumed_from_epoch > 0` in `*_graphsage_runs.csv` marks it. The
+HI-Small GraphSAGE results written before this was fixed (2026-10-10) have wrong
+`fit_seconds` and `epochs_run`; resubmitting HI-Small retrains every fit, because
+the old checkpoints are ignored.
 
 Pending jobs, with the reason:
 

@@ -64,6 +64,13 @@ from src.data.bank_views import (BANK_COLUMNS, filter_transactions,
 
 SEED = 1997
 
+# Bump whenever what a checkpoint holds, or what it must agree with, changes. It
+# is part of train_fold's resume signature, so a checkpoint written under an
+# older layout is ignored rather than resumed. Version 2 added the cumulative
+# training time; a version-1 checkpoint has none to continue from, so resuming
+# one would again report only the resumed epochs as fit_seconds.
+CHECKPOINT_VERSION = 2
+
 # Read as strings to match define_ML_labels, which joins the label table on
 # these values -- "00123" and 123 are different accounts otherwise.
 ID_DTYPES = {"From Bank": str, "To Bank": str, "Account": str, "Account.1": str}
@@ -591,6 +598,19 @@ def train_fold(data, train_mask, y, device, epochs=50, patience=5, hidden_channe
     resumes from it, so a cluster wall-clock timeout costs one epoch rather
     than the whole run.
 
+    The checkpoint also carries the training time spent so far, so
+    ``fit_seconds`` is the cost of the whole fit however many sessions it took:
+    the wall clock of the epoch loop, including the per-epoch validation pass
+    but not the checkpoint writes (resume overhead of the cluster job, not
+    training), summed over sessions. A fit resumed from a
+    finished checkpoint therefore returns the time it originally took, not
+    zero, and a checkpoint that already satisfies the stopping rule trains no
+    further epoch. The one thing not counted is an epoch killed before its
+    checkpoint was written. ``epochs_run`` is cumulative in the same way;
+    ``resumed_from_epoch`` is how many of those epochs were not trained in this
+    call (0 for a fit that started fresh), so a resumed run is visible in the
+    results rather than silent.
+
     Returns ``(model, info)`` with the timing and stopping diagnostics.
     """
     torch.manual_seed(seed)
@@ -620,13 +640,21 @@ def train_fold(data, train_mask, y, device, epochs=50, patience=5, hidden_channe
     # What a checkpoint must agree with to be resumable: a checkpoint left by
     # a run under different settings, or on a different fold, labels or
     # features (run_fingerprint), is otherwise resumed silently, and the run
-    # reports epochs it never trained under the settings it claims.
-    signature = {"in_channels": data.num_node_features, "hidden_channels": hidden_channels,
+    # reports epochs it never trained under the settings it claims. The stopping
+    # rule (patience, the epoch cap) and the validation slice are settings too:
+    # resuming an early-stopped checkpoint under a larger patience would
+    # silently continue a run the old patience had already ended.
+    signature = {"version": CHECKPOINT_VERSION,
+                 "in_channels": data.num_node_features, "hidden_channels": hidden_channels,
                  "dropout": dropout, "lr": lr, "batch_size": batch_size,
                  "num_neighbors": tuple(num_neighbors), "seed": seed,
+                 "epochs": epochs, "patience": patience, "val_fraction": val_fraction,
                  "fingerprint": run_fingerprint(train_mask, y, data.x)}
 
     start_epoch, best_ap, best_epoch, best_state, stale = 0, -np.inf, -1, None, 0
+    # Training time already spent in earlier sessions of this fit (from the
+    # checkpoint), and the epoch this session picked up from.
+    elapsed_before, resumed_from = 0.0, 0
 
     if checkpoint_path and resume and os.path.exists(checkpoint_path):
         try:
@@ -644,21 +672,30 @@ def train_fold(data, train_mask, y, device, epochs=50, patience=5, hidden_channe
         elif checkpoint.get("signature") != signature:
             if verbose:
                 print("    ignoring "+checkpoint_path+": trained under different "
-                      "settings or on a different fold, labels or features, "
-                      "starting fresh")
+                      "settings, on a different fold, labels or features, or by an "
+                      "older checkpoint version, starting fresh")
         else:
             model.load_state_dict(checkpoint["model_state"])
             optimizer.load_state_dict(checkpoint["optimizer_state"])
             start_epoch = checkpoint["epoch"] + 1
             best_ap, best_epoch = checkpoint["best_ap"], checkpoint["best_epoch"]
             best_state, stale = checkpoint["best_state"], checkpoint["stale"]
+            elapsed_before, resumed_from = checkpoint["elapsed_seconds"], start_epoch
             if verbose:
-                print("    resumed from "+checkpoint_path+" at epoch "+str(start_epoch))
+                print("    resumed from "+checkpoint_path+" at epoch "+str(start_epoch)
+                      +" ("+format(elapsed_before, ".1f")+" s already trained)")
+
+    # A checkpoint saved at the epoch that tripped the patience rule already
+    # satisfies it. The rule is tested only after an epoch has trained, so
+    # entering the loop would train one more epoch on every resume and keep
+    # extending the run past the patience it was configured with.
+    end_epoch = start_epoch if (val_mask is not None and stale >= patience) else epochs
 
     started = time.perf_counter()
+    saving = 0.0  # this session's checkpoint writes, kept out of fit_seconds
     epoch = start_epoch - 1
 
-    for epoch in range(start_epoch, epochs):
+    for epoch in range(start_epoch, end_epoch):
         model.train()
         total_loss = 0.0
         for batch in loader:
@@ -688,18 +725,22 @@ def train_fold(data, train_mask, y, device, epochs=50, patience=5, hidden_channe
                       +"  val AUC-PR "+format(val_ap, ".4f")+("  *" if improved else ""))
 
         if checkpoint_path:
+            save_started = time.perf_counter()
             atomic_torch_save({"epoch": epoch, "model_state": model.state_dict(),
                                "optimizer_state": optimizer.state_dict(),
                                "best_ap": best_ap, "best_epoch": best_epoch,
                                "best_state": best_state, "stale": stale,
+                               "elapsed_seconds": elapsed_before + (save_started - started) - saving,
                                "signature": signature}, checkpoint_path)
+            saving += time.perf_counter() - save_started
 
         if val_mask is not None and stale >= patience:
             if verbose:
                 print("    early stop: no val AUC-PR improvement for "+str(patience)+" epochs")
             break
 
-    fit_seconds = time.perf_counter() - started
+    # The whole fit, not this session: see the docstring.
+    fit_seconds = elapsed_before + (time.perf_counter() - started) - saving
 
     if best_state is not None:
         model.load_state_dict(best_state)
@@ -707,6 +748,7 @@ def train_fold(data, train_mask, y, device, epochs=50, patience=5, hidden_channe
     info = {
         "fit_seconds": fit_seconds,
         "epochs_run": epoch + 1,
+        "resumed_from_epoch": resumed_from,
         "epochs_to_best": best_epoch + 1 if best_epoch >= 0 else np.nan,
         "best_val_AP": best_ap if np.isfinite(best_ap) else np.nan,
         "early_stopped": bool(val_mask is not None and stale >= patience),

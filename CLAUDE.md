@@ -86,6 +86,20 @@ folds:
    is minutes where a tree is seconds. Widen `DATASETS` in the script if the budget
    allows; do not quietly assume the tree models' 5 x 9 grid was run here.
 
+   **Timing and resume (fixed 2026-10-10).** `train_fold` used to start its timer
+   after loading a checkpoint, so a fit resumed from a finished one reported ~0 s and
+   one resumed from an early-stopped one reported a single epoch — while `epochs_run`
+   stayed cumulative — and each resubmission over the same checkpoints trained one
+   more epoch past the patience. Now the checkpoint carries the cumulative training
+   time (`fit_seconds` is the whole fit, excluding checkpoint writes), a checkpoint
+   that already satisfies the stopping rule trains nothing further, and `patience`,
+   the epoch cap and `val_fraction` are part of the resume signature, as is
+   `CHECKPOINT_VERSION`, so every checkpoint written before the fix is ignored and
+   its fit retrained. **Every HI-Small `fit_seconds` / `epochs_run` written before the
+   fix is stale** (148 of 460 fits recorded ~0 s, 286 a single epoch); LI-Large's were
+   run from cleaned checkpoints and are sound. A non-zero `resumed_from_epoch` marks a
+   fit that was resumed in a later job.
+
 Remaining tasks (4–13) are largely independent loops over the existing pipeline. Three of
 them already have work on disk:
 

@@ -382,6 +382,10 @@ def run_target(dataset, config, data, node_order, laundering_combined, folds_df,
             "fit_seconds": info["fit_seconds"],
             "infer_seconds": infer_seconds,
             "epochs_run": info["epochs_run"],
+            # Epochs of epochs_run not trained in this job (0 = a fresh fit).
+            # fit_seconds covers all of them either way; this makes a resumed
+            # fit visible instead of silent.
+            "resumed_from_epoch": info["resumed_from_epoch"],
             "epochs_to_best": info["epochs_to_best"],
             "best_val_AP": info["best_val_AP"],
             # Process high-water mark, not this fold in isolation: RSS only
