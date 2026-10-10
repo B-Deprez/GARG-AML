@@ -86,7 +86,7 @@ if __name__ == '__main__':
         # Pre-processing setting comes from the dataset name; passing dataset
         # makes this stage own the edge-severance record.
         G_reduced = reduce_graph(G, parse_resolution(dataset)[1], dataset,
-                                 hubs=parse_hubs(dataset))
+                                 results_dir=RESULTS_DIR, hubs=parse_hubs(dataset))
 
         nodes = list(G_reduced.nodes)
         print(f"Number of nodes: {len(nodes)} | Using {n_cpu} processes")

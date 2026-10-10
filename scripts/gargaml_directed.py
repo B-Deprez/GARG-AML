@@ -98,7 +98,7 @@ if __name__ == '__main__':
         # The pre-processing setting comes from the dataset name. Passing the
         # dataset makes this stage own the edge-severance record.
         G_reduced = reduce_graph(G, parse_resolution(dataset)[1], dataset,
-                                 hubs=parse_hubs(dataset))
+                                 results_dir=RESULTS_DIR, hubs=parse_hubs(dataset))
 
         G_reduced_und = G_reduced.to_undirected()
         G_reduced_rev = G_reduced.reverse(copy=True)
