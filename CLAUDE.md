@@ -95,10 +95,15 @@ folds:
    that already satisfies the stopping rule trains nothing further, and `patience`,
    the epoch cap and `val_fraction` are part of the resume signature, as is
    `CHECKPOINT_VERSION`, so every checkpoint written before the fix is ignored and
-   its fit retrained. **Every HI-Small `fit_seconds` / `epochs_run` written before the
-   fix is stale** (148 of 460 fits recorded ~0 s, 286 a single epoch); LI-Large's were
-   run from cleaned checkpoints and are sound. A non-zero `resumed_from_epoch` marks a
-   fit that was resumed in a later job.
+   its fit retrained. A non-zero `resumed_from_epoch` marks a fit that was resumed in a
+   later job. HI-Small was **re-run from scratch and verified on 2026-10-11** (460 fits,
+   none resumed, early-stop gap exactly 5 in all 388 early-stopped fits, 1.25–2.07 s per
+   epoch), so its `fit_seconds` / `epochs_run` are sound. Anything built from the
+   earlier HI-Small GraphSAGE files — the old values were ~0 s for 148 of 460 fits and a
+   single epoch for 286 — is stale and must be rebuilt: `table_cost_HI-Small` and the
+   `VisualisationRunTime.ipynb` figure. LI-Large's timings were always sound (run from
+   cleaned checkpoints); its older fits have no `resumed_from_epoch` column, so they read
+   NaN there, meaning "recorded before the column existed", not "resumed".
 
 Remaining tasks (4–13) are largely independent loops over the existing pipeline. Three of
 them already have work on disk:
