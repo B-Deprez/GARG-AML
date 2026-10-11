@@ -65,6 +65,19 @@ SYNTHETIC_KEY_RENAME = {"precision": "Precision", "f1": "F1"}
 def _synthetic_cell(metrics):
     return {SYNTHETIC_KEY_RENAME.get(k, k): _sanitise(float(v)) for k, v in metrics.items()}
 
+# The rule behind the base score's Precision and F1, IBM and synthetic alike:
+# flag a node when its score is above this. A raw score has no 0/1 prediction
+# of its own, so this is a stated cut, not something the model predicts -- the
+# tables label it as such. 0.5 is the cut the published code used for both
+# (it reproduces every published synthetic Precision/F1 of the two score rows
+# to three decimals). Threshold-free metrics (AUC, P@K) do not depend on it.
+SCORE_THRESHOLD = 0.5
+
+def evaluate_base_score(y_true, score):
+    """evaluate_scores for the raw GARG-AML score, Precision/F1 at SCORE_THRESHOLD."""
+    score = np.asarray(score)
+    return evaluate_scores(y_true, score, y_pred=(score > SCORE_THRESHOLD).astype(int))
+
 def divergence_metric(dist_0, dist_1):
     mean_0 = np.mean(dist_0)
     variance_0 = np.var(dist_0)
@@ -237,7 +250,7 @@ def _fold_records(labels_gargaml_full, y_true, folds_df, cut_off, column, contex
         pooled.append(accounts)
         y_f, s_f = y_series.loc[accounts], score_series.loc[accounts]
         try:
-            metrics = evaluate_scores(y_f.values, s_f.values)
+            metrics = evaluate_base_score(y_f.values, s_f.values)
             status = "ok"
         except Exception as exc:  # a fold with no positives cannot be scored
             print("    fold "+str(fold)+" skipped: "+repr(exc))
@@ -249,7 +262,7 @@ def _fold_records(labels_gargaml_full, y_true, folds_df, cut_off, column, contex
         labels_gargaml_full.index.isin(np.concatenate([a.values for a in pooled]))]
     y_p, s_p = y_series.loc[accounts], score_series.loc[accounts]
     try:
-        metrics = evaluate_scores(y_p.values, s_p.values)
+        metrics = evaluate_base_score(y_p.values, s_p.values)
         status = "ok"
     except Exception as exc:
         metrics, status = nan_metrics(), "skipped: "+str(exc)
@@ -317,9 +330,7 @@ def distribution_scores_IBM(dataset, results_df, str_directed, str_supervised):
                            target=column, seed=SEED)
 
             try:
-                # No natural 0/1 prediction for a raw score -- precision/f1
-                # come back NaN rather than invented at some threshold.
-                metrics = evaluate_scores(y_true, y_pred)
+                metrics = evaluate_base_score(y_true, y_pred)
                 result_list = [_sanitise(metrics[name]) for name in metric_names()]
                 status = "ok"
             except Exception as exc:
@@ -405,24 +416,10 @@ def plot_lift_synthetic(laundering_combined, columns, str_directed, str_supervis
     plt.close()
 
 
-# The rule behind the synthetic base score's Precision and F1: flag a node when
-# its score is above this. A raw score has no 0/1 prediction of its own, so
-# this is a stated cut, not something the model predicts -- the table labels it
-# as such. 0.5 is the cut the published synthetic table used (it reproduces
-# every published Precision/F1 of the two score rows to three decimals).
-# Threshold-free metrics (AUC, P@K) do not depend on it.
-SCORE_THRESHOLD = 0.5
-
 def _score_metrics(frame, column):
-    """Base-score metrics for one label over the rows of ``frame``.
-
-    Precision and F1 use the ``GARGAML > SCORE_THRESHOLD`` rule; the IBM path
-    (:func:`distribution_scores_IBM`) still reports them as NaN.
-    """
+    """Base-score metrics for one label over the rows of ``frame``."""
     try:
-        score = frame["GARGAML"].values
-        return evaluate_scores((frame[column]*1).values, score,
-                               y_pred=(score > SCORE_THRESHOLD).astype(int))
+        return evaluate_base_score((frame[column]*1).values, frame["GARGAML"].values)
     except Exception as exc:
         print("    skipped: "+repr(exc))
         return nan_metrics()

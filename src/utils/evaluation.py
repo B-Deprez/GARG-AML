@@ -380,11 +380,12 @@ def evaluate_scores(y_true, y_score, y_pred=None, alert_sizes=ALERT_SIZES):
     precision and F1. Pass the model's own ``predict`` output as
     ``y_pred`` when one exists (:func:`evaluate_model` always does).
 
-    When there is no natural 0/1 prediction -- the raw GARG-AML score (range
-    [-1, 1]), an isolation forest's ``-score_samples`` -- ``precision`` and
-    ``f1`` are NaN rather than invented at an arbitrary 0.5 cut, which would
-    write a fabricated number into the same column as a real ``predict``
-    result.
+    Without ``y_pred``, ``precision`` and ``f1`` are NaN rather than invented
+    at an arbitrary cut. The raw GARG-AML score (range [-1, 1]) passes a
+    stated ``score > 0.5`` rule
+    (``scripts/distribution_scores.py::evaluate_base_score``), which the
+    tables label as such; an isolation forest's ``-score_samples`` passes
+    nothing.
     """
     if y_pred is None:
         precision = f1 = np.nan
