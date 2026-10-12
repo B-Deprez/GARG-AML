@@ -12,7 +12,6 @@ sys.path.append(DIR)
 import pandas as pd
 from tqdm import tqdm
 from multiprocessing import Pool, cpu_count
-import timeit
 
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
@@ -21,7 +20,7 @@ from src.data.graph_construction import construct_synthetic_graph
 from src.utils.graph_processing import graph_community
 from src.methods.GARGAML import GARG_AML_node_directed_measures
 from src.utils.runtime import (env_override, select_datasets, echo_config,
-                              should_skip, write_csv, log_timing, resolve_results_dir)
+                              should_skip, write_csv, log_timing, resolve_results_dir, StageTimer)
 
 # Global variable for worker processes
 graph_for_worker = None
@@ -115,35 +114,41 @@ if __name__ == '__main__':
         out_path = f"{RESULTS_DIR}/{dataset}_GARGAML_directed.csv"
         if should_skip(out_path, dataset):
             continue
-        start_time = timeit.default_timer()
+        timer = StageTimer()  # the timed region starts here; stages tile it
         path = 'data/edge_data_'+dataset+'.csv'
         G = construct_synthetic_graph(path=path, directed = directed)
+        timer.lap("build")
 
-        G_reduced = graph_community(G)
+        G_reduced = graph_community(G, timer=timer)
 
         G_reduced_und = G_reduced.to_undirected()
         G_reduced_rev = G_reduced.reverse(copy=True)
+        timer.lap("views")
 
         nodes = list(G_reduced.nodes)
         print(f"Number of nodes: {len(nodes)} | Using {n_cpu} processes")
 
         with Pool(processes=n_cpu, initializer=init_worker, initargs=(G_reduced,G_reduced_rev,G_reduced_und,)) as pool:
             results = list(tqdm(pool.imap(process_node, nodes), total=len(nodes)))
+        timer.lap("pool")
 
         (
             nodes, 
             measure_00_list, measure_01_list, measure_02_list, measure_10_list, measure_11_list, measure_12_list, measure_20_list, measure_21_list, measure_22_list, 
             size_00_list, size_01_list, size_02_list, size_10_list, size_11_list, size_12_list, size_20_list, size_21_list, size_22_list
         ) = zip(*results)
+        timer.lap("unpack")
 
-        elapsed = timeit.default_timer() - start_time
+        elapsed = timer.elapsed()
         print(f"Dataset {dataset} completed in {elapsed:.2f} seconds")
+        print("Stages: " + timer.summary())
 
         with open(f"{RESULTS_DIR}/time_results_dir.txt", "a") as f:
             f.write(f"{dataset}: {elapsed:.2f}\n")
         # Per-task timing file beside the shared append, which is a race under
         # an array job. slurm/collect.slurm concatenates these.
-        log_timing(dataset, "directed", elapsed, n_cpu, results_dir=RESULTS_DIR)
+        log_timing(dataset, "directed", elapsed, n_cpu, results_dir=RESULTS_DIR,
+                   timer=timer, n_nodes=len(nodes))
 
         df = pd.DataFrame({
             "node": nodes,

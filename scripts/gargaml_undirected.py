@@ -3,7 +3,6 @@
 # Run from the repository root.
 import os
 import sys
-import timeit
 from multiprocessing import Pool, cpu_count
 
 import pandas as pd
@@ -18,7 +17,7 @@ from src.data.bank_views import parse_view, trans_path
 from src.utils.graph_processing import parse_hubs, parse_resolution, reduce_graph
 from src.methods.GARGAML import GARG_AML_node_undirected_measures
 from src.utils.runtime import (env_override, select_datasets, echo_config,
-                              should_skip, write_csv, log_timing, resolve_results_dir)
+                              should_skip, write_csv, log_timing, resolve_results_dir, StageTimer)
 
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
@@ -73,41 +72,46 @@ if __name__ == '__main__':
         out_path = f"{RESULTS_DIR}/{dataset}_GARGAML_undirected.csv"
         if should_skip(out_path, dataset):
             continue
-        start_time = timeit.default_timer()
+        timer = StageTimer()  # the timed region starts here; stages tile it
 
         base, banks = parse_view(dataset)  # "HI-Small_bank012" -> ("HI-Small", ["012"])
         if base in ["HI-Small", "LI-Large"]:
             G = construct_IBM_graph(path=trans_path(dataset), directed=directed, banks=banks)
         else:
             raise ValueError(f"Invalid dataset: {dataset}")
+        timer.lap("build")
         if banks is not None:
             print(f"Single-bank view of {base}: banks {banks}")
 
         # Pre-processing setting comes from the dataset name; passing dataset
         # makes this stage own the edge-severance record.
         G_reduced = reduce_graph(G, parse_resolution(dataset)[1], dataset,
-                                 results_dir=RESULTS_DIR, hubs=parse_hubs(dataset))
+                                 results_dir=RESULTS_DIR, hubs=parse_hubs(dataset), timer=timer)
 
         nodes = list(G_reduced.nodes)
         print(f"Number of nodes: {len(nodes)} | Using {n_cpu} processes")
 
         with Pool(processes=n_cpu, initializer=init_worker, initargs=(G_reduced,)) as pool:
             results = list(tqdm(pool.imap(process_node, nodes), total=len(nodes)))
+        timer.lap("pool")
 
         (
             nodes_out,
             measure_1_list, measure_2_list, measure_3_list,
             size_1_list, size_2_list, size_3_list
         ) = zip(*results)
+        timer.lap("unpack")
 
-        elapsed = timeit.default_timer() - start_time
+        elapsed = timer.elapsed()
         print(f"Dataset {dataset} completed in {elapsed:.2f} seconds")
+        print("Stages: " + timer.summary())
 
         with open(f'{RESULTS_DIR}/time_results_undir.txt', 'a') as f:
             f.write(f"{dataset}: {elapsed:.2f}\n")
         # Per-task timing file beside the shared append above, which races under
         # an array job; slurm/collect.slurm concatenates these.
-        log_timing(dataset, "undirected", elapsed, n_cpu, results_dir=RESULTS_DIR)
+        log_timing(dataset, "undirected", elapsed, n_cpu, results_dir=RESULTS_DIR,
+                   timer=timer, n_nodes=len(nodes))
 
         df = pd.DataFrame({
             "node": nodes_out,

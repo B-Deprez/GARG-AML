@@ -12,7 +12,6 @@ sys.path.append(DIR)
 import pandas as pd
 from tqdm import tqdm
 from multiprocessing import Pool, cpu_count
-import timeit
 
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
@@ -21,7 +20,7 @@ from src.data.graph_construction import construct_synthetic_graph
 from src.utils.graph_processing import graph_community
 from src.methods.GARGAML import GARG_AML_node_undirected_measures
 from src.utils.runtime import (env_override, select_datasets, echo_config,
-                              should_skip, write_csv, log_timing, resolve_results_dir)
+                              should_skip, write_csv, log_timing, resolve_results_dir, StageTimer)
 
 graph_for_worker = None
 
@@ -101,31 +100,36 @@ if __name__ == '__main__':
         out_path = f"{RESULTS_DIR}/{dataset}_GARGAML_undirected_parallel.csv"
         if should_skip(out_path, dataset):
             continue
-        start_time = timeit.default_timer()
+        timer = StageTimer()  # the timed region starts here; stages tile it
 
         path = 'data/edge_data_'+dataset+'.csv'
         G = construct_synthetic_graph(path=path, directed = directed)
+        timer.lap("build")
 
-        G_reduced = graph_community(G)
+        G_reduced = graph_community(G, timer=timer)
 
         nodes = list(G_reduced.nodes)
         print(f"Number of nodes: {len(nodes)} | Using {n_cpu} processes")
 
         with Pool(processes=n_cpu, initializer=init_worker, initargs=(G_reduced,)) as pool:
             results = list(tqdm(pool.imap(process_node, nodes), total=len(nodes)))
+        timer.lap("pool")
         (
             nodes_out,
             measure_1_list, measure_2_list, measure_3_list,
             size_1_list, size_2_list, size_3_list
         ) = zip(*results)
+        timer.lap("unpack")
 
-        elapsed = timeit.default_timer() - start_time
+        elapsed = timer.elapsed()
         print(f"Elapsed time: {elapsed:.2f} seconds")
+        print("Stages: " + timer.summary())
         with open(f'{RESULTS_DIR}/time_results_undir.txt', 'a') as f:
             f.write(f"{dataset}: {elapsed:.2f}\n")
         # Per-task timing file beside the shared append above, which races under
         # an array job; slurm/collect.slurm concatenates these.
-        log_timing(dataset, "undirected", elapsed, n_cpu, results_dir=RESULTS_DIR)
+        log_timing(dataset, "undirected", elapsed, n_cpu, results_dir=RESULTS_DIR,
+                   timer=timer, n_nodes=len(nodes))
 
         df = pd.DataFrame({
             "node": nodes_out,

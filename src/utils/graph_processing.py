@@ -97,7 +97,7 @@ def strip_resolution(name):
 
 
 def reduce_graph(G, resolution=DEFAULT_RESOLUTION, dataset=None,
-                 results_dir="results", hubs=None):
+                 results_dir="results", hubs=None, timer=None):
     """Apply the Louvain pre-processing at ``resolution``, or not at all.
 
     ``hubs=k`` is the other arm of the sensitivity analysis: Louvain is
@@ -119,12 +119,18 @@ def reduce_graph(G, resolution=DEFAULT_RESOLUTION, dataset=None,
     When ``dataset`` is given, one row of severance statistics is appended to
     ``results/louvain_severance.csv``, so every run records the share of
     edges dropped without the measure scripts having to.
+
+    ``timer`` is an optional :class:`src.utils.runtime.StageTimer`; the
+    reduction then charges its ``louvain`` and ``reduce`` stages to it (hub
+    removal and the no-Louvain arm only ``reduce``).
     """
     if hubs is not None:
         H = graph_degree(G, n_hubs=hubs)
     else:
-        H = G if resolution is None else graph_community(G, resolution=resolution)
+        H = G if resolution is None else graph_community(G, resolution=resolution, timer=timer)
     _log_severance(dataset, setting_label(resolution, hubs), G, H, results_dir)
+    if timer is not None:
+        timer.lap("reduce")  # includes the severance log's edge count
     return H
 
 
@@ -214,10 +220,14 @@ def community_map(G, resolution=DEFAULT_RESOLUTION):
     return node_community
 
 
-def graph_community(G, resolution=10): # large resolution to have smaller communities
+def graph_community(G, resolution=10, timer=None): # large resolution to have smaller communities
+    # ``timer``: optional StageTimer (src/utils/runtime.py); Louvain is charged
+    # to its "louvain" stage and the edge filter to "reduce".
     directed = nx.is_directed(G)
 
     node_community = community_map(G, resolution)
+    if timer is not None:
+        timer.lap("louvain")
 
     # A new graph keeping every node, but only intra-community edges.
     if directed:
@@ -230,5 +240,7 @@ def graph_community(G, resolution=10): # large resolution to have smaller commun
     for u, v in G.edges():
         if node_community[u] == node_community[v]:
             H.add_edge(u, v, **G[u][v])
-        
+
+    if timer is not None:
+        timer.lap("reduce")
     return(H)

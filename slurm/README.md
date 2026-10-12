@@ -517,6 +517,26 @@ timing file per task under `results/timing/`, with job id, host, worker count an
 timestamp; `collect.slurm` concatenates them into `results/timing_all.csv`. The
 legacy files are still appended to, so `VisualisationRunTime.ipynb` is unaffected.
 
+**Per-stage timing.** The four measure scripts also split `seconds` into stages
+(`src/utils/runtime.py::StageTimer`), written as extra columns of the same per-task
+file and printed as a `Stages:` line in the job log. `seconds` is still the whole
+timed region, so it stays comparable with older runs. The columns are
+`build_seconds` (read the data, construct the graph), `louvain_seconds`
+(`community_map`: the single-threaded Louvain call), `reduce_seconds` (the
+intra-community edge filter, or hub removal), `views_seconds` (directed only),
+`pool_seconds` (create the pool, score every node, tear it down) and
+`unpack_seconds`. A stage a run never enters has no column (`louvain_seconds`
+under `_nolouvain` or `_hubs<k>`), so it reads NaN in `timing_all.csv`, as do all
+rows written before the columns existed. The same file records the context
+needed to read a timing against a machine: `n_nodes` (of the reduced graph),
+`load1_start` / `load1_end` (the node's 1-minute load average, which includes this
+job's own processes -- a shared node's load is what separates a slow stage from a
+busy neighbour), `python` / `networkx` / `numpy` versions, `cpu_model`,
+`cpus_allowed` (the Slurm cpuset) and `cpus_node`. Louvain is the stage to watch:
+on HI-Small it was 54-71 % of the timed region in a local profile, and it is
+serial, pure Python and memory-latency-bound, so it is the stage a busy or slower
+node stretches most.
+
 **Fail-fast, so the mail tells the truth.** Every job runs `set -eo pipefail`
 right after `source activate gargaml`. Before this, the closing `echo Finished`
 set the job's exit code, so a `ModuleNotFoundError` or `FileNotFoundError` seconds

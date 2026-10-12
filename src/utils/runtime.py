@@ -29,6 +29,7 @@ readers parse happily as a short file, and which the skip-if-exists resume
 
 import os
 import sys
+import timeit
 
 
 def env_override(key, default, cast=str):
@@ -219,8 +220,102 @@ def timing_path(dataset, direction, results_dir="results"):
     return os.path.join(directory, stem + ".csv")
 
 
-def log_timing(dataset, direction, elapsed, n_workers, results_dir="results"):
-    """Record one dataset's wall time with enough identity to attribute it later."""
+def _load1():
+    """1-minute load average of the node, or ``None`` where the OS has none."""
+    try:
+        return round(os.getloadavg()[0], 2)
+    except (AttributeError, OSError):
+        return None
+
+
+class StageTimer:
+    """Wall time of one dataset's timed region, split into named stages.
+
+    ``lap(name)`` charges the time since the previous lap (or since
+    construction) to ``name``; laps with the same name accumulate. The stages
+    therefore tile the region exactly -- ``sum(stages) == elapsed()`` -- and
+    ``elapsed()`` is the figure the measure scripts have always written to
+    ``time_results_*.txt``, so the total stays comparable with older runs.
+
+    The stages the measure scripts use, in order: ``build`` (read the data,
+    construct the graph), ``louvain`` (``community_map``, including its copy of
+    the graph), ``reduce`` (the intra-community edge filter, or hub removal,
+    plus the severance log), ``views`` (directed only: the undirected and
+    reversed copies the workers need), ``pool`` (create the pool, score every
+    node, tear the pool down) and ``unpack`` (reassemble the result tuples).
+    A stage a dataset never enters -- ``louvain`` under ``_nolouvain`` --
+    is simply absent.
+
+    The node's load average is read at construction too: a Slurm node is
+    shared, and the load is what separates a slow stage from a busy node. It
+    includes this job's own processes.
+    """
+
+    def __init__(self):
+        self.load_start = _load1()
+        self.start = self._mark = timeit.default_timer()
+        self.stages = {}
+
+    def lap(self, name):
+        now = timeit.default_timer()
+        self.stages[name] = self.stages.get(name, 0.0) + (now - self._mark)
+        self._mark = now
+
+    def elapsed(self):
+        return self._mark - self.start
+
+    def summary(self):
+        """One line for the job log: ``build 10.4 s (3%) | louvain 235.9 s (71%) | ...``."""
+        total = self.elapsed()
+        return " | ".join(
+            name + " " + format(secs, ".1f") + " s (" + format(100.0 * secs / total if total else 0.0, ".0f") + "%)"
+            for name, secs in self.stages.items()
+        )
+
+
+def _environment():
+    """What the run executed on, for attributing a timing to a machine and a stack."""
+    import platform
+
+    versions = {"python": platform.python_version()}
+    for module in ("networkx", "numpy"):
+        try:
+            versions[module] = __import__(module).__version__
+        except Exception:                             # noqa: BLE001 - a missing version is not a failure
+            versions[module] = ""
+
+    cpu_model = ""
+    try:
+        with open("/proc/cpuinfo") as handle:
+            for line in handle:
+                if line.startswith("model name"):
+                    cpu_model = line.split(":", 1)[1].strip()
+                    break
+    except OSError:
+        cpu_model = platform.processor() or platform.machine()
+
+    try:
+        allowed = len(os.sched_getaffinity(0))        # honours a Slurm cpuset
+    except AttributeError:
+        allowed = os.cpu_count()
+
+    return {**versions, "cpu_model": cpu_model, "cpus_allowed": allowed, "cpus_node": os.cpu_count()}
+
+
+def log_timing(dataset, direction, elapsed, n_workers, results_dir="results",
+               timer=None, n_nodes=None):
+    """Record one dataset's wall time with enough identity to attribute it later.
+
+    ``seconds`` is the whole timed region, as it always was. Given the run's
+    ``timer`` (:class:`StageTimer`) the row also carries one
+    ``<stage>_seconds`` column per stage, the node's load average at the start
+    and the end of the region, and the machine and library versions; ``n_nodes``
+    is the node count of the reduced graph the workers scored, so the pool stage
+    can be read per node. A stage the run did not enter has no column, and reads
+    as NaN once files are concatenated. Files written before these columns
+    existed lack them the same way.
+    """
+    import csv
     import socket
     from datetime import datetime, timezone
 
@@ -235,10 +330,18 @@ def log_timing(dataset, direction, elapsed, n_workers, results_dir="results"):
         "host": socket.gethostname(),
         "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
-    header = ",".join(row.keys())
-    values = ",".join(str(v) for v in row.values())
-    with open(path, "w") as handle:
-        handle.write(header + "\n" + values + "\n")
+    if timer is not None:
+        row["n_nodes"] = "" if n_nodes is None else n_nodes
+        for name, secs in timer.stages.items():
+            row[name + "_seconds"] = round(secs, 2)
+        row["load1_start"] = "" if timer.load_start is None else timer.load_start
+        end_load = _load1()
+        row["load1_end"] = "" if end_load is None else end_load
+        row.update(_environment())
+    with open(path, "w", newline="") as handle:
+        writer = csv.writer(handle, lineterminator="\n")
+        writer.writerow(row.keys())
+        writer.writerow(row.values())
     return path
 
 

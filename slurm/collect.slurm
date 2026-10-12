@@ -62,7 +62,10 @@ python -u scripts/build_tables.py
 
 # Concatenate the per-task timing files into one frame. Each task writes its own
 # file under <dir>/timing/ carrying dataset, direction, seconds, worker count,
-# job id, host and timestamp. The <dir>/time_results_*.txt files are written as
+# job id, host and timestamp, plus per-stage seconds (build, louvain, reduce,
+# views, pool, unpack), node count, node load and library versions -- see
+# slurm/README.md, "Per-stage timing". Files from before those columns existed
+# concatenate with NaN in them. The <dir>/time_results_*.txt files are written as
 # well -- append-shared by three scripts, one "<dataset>: <secs>" line each --
 # and are what VisualisationRunTime.ipynb reads.
 # The heredoc delimiter is quoted ('PYEOF'), so shell variables do not expand
