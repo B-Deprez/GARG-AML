@@ -18,14 +18,18 @@ rerun (see CLAUDE.md's task 2 note on the stale tree grid).
 
 Run from the repository root::
 
-    python scripts/label_distribution.py
+    python scripts/label_distribution.py              # write the CSVs, print the LaTeX table
+    python scripts/label_distribution.py --print-only # print the LaTeX table, write nothing
 
 Writes the same four files ``notebooks/DistributionScores.ipynb`` already
-reads, so that notebook needs no changes -- just re-run its cells.
+reads, so that notebook needs no changes -- just re-run its cells. Either way
+it prints the table as the manuscript lays it out (percent of accounts
+labelled 1, cut-offs as column headers), ready to paste.
 """
 
 import os
 import sys
+import warnings
 
 DIR = "./"
 os.chdir(DIR)
@@ -37,10 +41,37 @@ from src.utils.runtime import resolve_results_dir, select_datasets
 
 RESULTS_DIR = resolve_results_dir()
 
+PRINT_ONLY = "--print-only" in sys.argv[1:]
+
 # A missing dataset is skipped with a message. Override with GARGAML_DATASET
 # (or GARGAML_DATASETS) to run one at a time -- LI-Large's read alone takes a
 # while, so it's worth separating from HI-Small's near-instant run.
 DATASETS = select_datasets(["HI-Small", "LI-Large"])
+
+def latex_table(long_df, dataset):
+    """The label-percentage table in the manuscript's layout (Tables 7-8)."""
+    table = (long_df[long_df["metric"] == "imbalance"]
+             .pivot_table(index="target", columns="cutoff", values="value", sort=False)
+             .mul(100).round(3))
+    table.columns = [str(int(round(cutoff * 100))) for cutoff in table.columns]
+    table.index = ["Is Laundering" if t == "Is Laundering" else t.capitalize()
+                   for t in table.index]
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", FutureWarning)
+        body = table.to_latex(float_format="%.3f", index_names=False,
+                              column_format="l" + "r" * len(table.columns))
+    body = body.replace("{} &", "In percentage $(\\%)$ &", 1)
+    body = "\n".join("    " + line for line in body.rstrip().splitlines())
+    return (
+        "\\begin{table}[]\n    \\centering\n"
+        "    \\caption{Percentage of instances labelled as 1 in the " + dataset
+        + " dataset per cut-off. }\n"
+        "    \\label{tab:labels data " + dataset + "}\n"
+        "    \\resizebox{\\linewidth}{!}{%\n" + body + "}\n"
+        "\\end{table}"
+    )
+
 
 if __name__ == "__main__":
     for dataset in DATASETS:
@@ -55,7 +86,12 @@ if __name__ == "__main__":
 
         # Written under both direction tokens: the value is the same either
         # way, and the notebook picks the file by direction in its filename.
-        for direction in ["undirected", "directed"]:
-            written = write_metric_matrices(long_df, dataset, direction,
-                                            results_dir=RESULTS_DIR)
-            print("  " + direction + ": " + str(written))
+        if not PRINT_ONLY:
+            for direction in ["undirected", "directed"]:
+                written = write_metric_matrices(long_df, dataset, direction,
+                                                results_dir=RESULTS_DIR)
+                print("  " + direction + ": " + str(written))
+
+        print()
+        print(latex_table(long_df, dataset))
+        print()
