@@ -15,7 +15,9 @@
 #     too large for git and must be downloaded from Kaggle (see README).
 #   * Synthetic graphs are regenerated on demand by
 #     src/data/synthetic_smurfing.py, so they are reproducible, not source.
-data/
+# Anchored to the repo root so it only matches the top-level data/ folder, not
+# the tracked source package src/data/.
+/data/
 
 # --- Generated results & artifacts -----------------------------------------
 # Score matrices, timing logs, performance CSVs and the decision-tree plots are
@@ -47,22 +49,52 @@ notebooks/*.png
 # Early reference implementation, superseded by src/ — not part of the pipeline.
 initial_code.py
 
+# Local archive in the repo root (~410 MB) -- not source, and far too large
+# for git.
+/Archief.zip
+
 # --- Personal / internal notes ----------------------------------------------
 # Submission/reviewer notes etc. — not code, not needed for reproducibility,
-# and not meant to be public.
+# and not meant to be public. They name reviewers, editors and journal
+# internals, so they must never be pushed.
 GARG-AML_rejection_feedback.md
+GARG-AML_review_feedback.md
+GARG-AML_code_changes.md
+PACKAGING_PLAN.md
+
+# Working brief for building the VSC/Slurm harness: an instruction file written
+# to be handed to an agent, not documentation of the pipeline. The runbook that
+# IS meant to be read lives in slurm/README.md once that exists.
+VSC_SLURM_PROMPT.md
+
+# Packaging migration (Phase 0): the frozen-behaviour oracle and the two
+# scripts that build and verify it. These move to the garg-aml repo in Phase 1,
+# where they ARE committed -- they are the fixtures' provenance. They stay out
+# of this repo because it is the paper repo, not the library's.
+golden/
+scripts/make_golden.py
+scripts/check_golden.py
 
 # --- Exploratory / scratch notebooks ---------------------------------------
 # Only the notebooks that produce paper figures/analysis are tracked
 # (toyexample, VisualisationResults, VisualisationRunTime, VisualisationNetwork,
-# DistributionScores). The ones below are one-off exploration, sanity checks or
-# dev scratch and are kept out of git.
+# DistributionScores, LouvainEdgeSeverance). The ones below are one-off
+# exploration, sanity checks or dev scratch and are kept out of git.
 notebooks/AnalysisData.ipynb
 notebooks/AnalysisParallel.ipynb
 notebooks/AnalysisSyntheticData.ipynb
 notebooks/AnomalousPatterns.ipynb
 notebooks/TestCode.ipynb
 notebooks/Transfer.ipynb
+
+# --- Slurm job logs --------------------------------------------------------
+# The .slurm scripts write their stdout/stderr into slurm/logs/, beside the
+# job scripts. They are per-run output, not source, and an array job drops one
+# pair per task -- they would otherwise fill `git status` after every submission.
+# The harness itself (slurm/*.slurm, slurm/*.sh, slurm/README.md) IS tracked,
+# and slurm/logs/.gitkeep keeps the directory present after a fresh clone.
+slurm/logs/*.out
+slurm/logs/*.err
 
 # --- Python ----------------------------------------------------------------
 __pycache__/

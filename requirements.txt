@@ -13,9 +13,29 @@ scikit-learn
 matplotlib
 tqdm
 
+# scipy is already a scikit-learn dependency, but the notebooks import it
+# directly (scipy.stats.friedmanchisquare, studentized_range, pearsonr), so
+# it is declared rather than relied on transitively.
+scipy
+
+# Task 8's statistical test reporting, in notebooks/VisualisationResults.ipynb:
+# scikit-posthocs supplies posthoc_nemenyi_friedman and the critical-difference
+# diagrams (Figs. 10-11) written to results/CD_{ROC,PR}_full.pdf.
+scikit-posthocs
+
+# seaborn is used for the plots in notebooks/BankObservability.ipynb (task 5's
+# partial-observability appendix) and DistributionScores.ipynb.
+seaborn
+
 # Synthetic smurfing graphs are generated with python-igraph
 # (imported as `igraph`).
 igraph
+
+# GraphSAGE baseline (task 1). Tested with torch 2.3.1 / torch-geometric 2.5.3;
+# CPU (or Apple Silicon MPS) is sufficient at HI-Small scale. LI-Large will need
+# revisiting (pyg-lib, int32 edge_index) -- see GARG-AML_code_changes.md task 1.
+torch
+torch-geometric
 
 # Notebooks under notebooks/ also use Jupyter; uncomment if you run them.
 # jupyter
