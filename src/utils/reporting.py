@@ -885,7 +885,8 @@ def pattern_splitting_table(results_dir="results", column="pct_destroyed",
     if summary.empty or column not in summary.columns:
         return pd.DataFrame()
 
-    summary["resolution"] = [v if v == "off" else float(v)
+    # "off" and "hubs<k>" arrive as strings and the resolutions as numbers.
+    summary["resolution"] = [v if v == "off" or _is_hubs(v) else float(v)
                              for v in summary["resolution"]]
 
     table = summary.pivot_table(index=["dataset", "pattern_type"],

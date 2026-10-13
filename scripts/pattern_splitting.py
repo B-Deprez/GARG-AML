@@ -26,6 +26,13 @@ Outputs
 Companion to ``results/louvain_severance.csv``, which records how many edges
 the same reduction severs.
 
+The hub-removal arms (``hubs<k>``) run through the same measurement. A removed
+hub is an account absent from the graph, so every edge touching it is lost and
+a 2-path through it is gone; there are no communities, so ``split`` and
+``n_communities`` do not apply and are written as NaN rather than as a
+"never split" that would read like a result. ``pct_destroyed`` and the edge
+and path survival are the comparable columns.
+
 The graph is built once and only Louvain is re-run per resolution; graph
 construction from the transactions file dominates the runtime. Attempt
 membership is exact rather than inferred: ``data/<dataset>_Patterns.txt``
@@ -42,12 +49,14 @@ sys.path.append(DIR)
 import warnings
 warnings.simplefilter(action="ignore", category=FutureWarning)
 
+import numpy as np
 import pandas as pd
 
 from src.data.bank_views import parse_view, patterns_path, trans_path
 from src.data.graph_construction import construct_IBM_graph
 from src.data.pattern_construction import pattern_instances
-from src.utils.graph_processing import DEFAULT_RESOLUTION, community_map
+from src.utils.graph_processing import (DEFAULT_RESOLUTION, community_map,
+                                        graph_degree, setting_label)
 from src.utils.pattern_splitting import analyse, summarise
 from src.utils.runtime import (env_override, select_datasets, echo_config, as_list,
                               resolve_results_dir)
@@ -61,6 +70,10 @@ DATASETS = ["HI-Small"]
 # intact. It is computed rather than assumed, so the control goes through
 # the same measurement as the rest.
 RESOLUTIONS = [None, 1, 5, DEFAULT_RESOLUTION, 20, 50]
+
+# The hub-removal arms of the same ablation (``HI-Small_hubs<k>``): delete the k
+# highest-degree accounts instead of running Louvain.
+HUBS = [5, 10, 100]
 
 DATASETS = select_datasets(DATASETS)
 RESULTS_DIR = resolve_results_dir()
@@ -94,6 +107,28 @@ def diagnose_dataset(dataset):
         destroyed = (~had["detectable_after"]).mean() * 100 if len(had) else float("nan")
         print(f"  resolution={'off' if resolution is None else resolution:<4}"
               f"  split {100 * frame['split'].mean():5.1f}%"
+              f"  edges kept {100 * frame['edge_survival'].mean():5.1f}%"
+              f"  2-paths kept {100 * had['path_survival'].mean():5.1f}%"
+              f"  DESTROYED {destroyed:5.1f}%")
+
+    for k in HUBS:
+        # Exactly the accounts the measure scripts delete: graph_degree is the
+        # pipeline's own call, ranked on the undirected view.
+        retained = set(graph_degree(G, n_hubs=k).nodes)
+        removed = nodes - retained
+        communities = dict.fromkeys(retained, 0)
+
+        # ``retained`` as the node set, so a removed hub counts as absent from
+        # the graph, which is what it is.
+        frame = analyse(instances, retained, communities, dataset, setting_label(None, k))
+        # No communities, so nothing is split across them.
+        frame["split"] = np.nan
+        frame["n_communities"] = np.nan
+        frames.append(frame)
+
+        had = frame[frame["detectable_before"]]
+        destroyed = (~had["detectable_after"]).mean() * 100 if len(had) else float("nan")
+        print(f"  hubs={k:<8}  removed {len(removed):>4}"
               f"  edges kept {100 * frame['edge_survival'].mean():5.1f}%"
               f"  2-paths kept {100 * had['path_survival'].mean():5.1f}%"
               f"  DESTROYED {destroyed:5.1f}%")
@@ -144,5 +179,5 @@ def main():
 
 
 if __name__ == "__main__":
-    echo_config(__file__, datasets=DATASETS, resolutions=RESOLUTIONS)
+    echo_config(__file__, datasets=DATASETS, resolutions=RESOLUTIONS, hubs=HUBS)
     main()

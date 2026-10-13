@@ -189,6 +189,30 @@ ls results-revision/LI-Large_*metrics.csv
 slurm/submit.sh slurm/collect.slurm all
 ```
 
+- **The pre-processing sweep on LI-Large (pure score only).** The same arms as
+  HI-Small, with the same *k* and resolutions, minus `LI-Large_nolouvain`
+  (expected infeasible, see Known gaps). Stage 1 needs only `data/`, so every
+  line stands alone; the arm goes in the name and the array index is not used.
+  From HI-Small's timings the hub arms should cost no more than the published
+  LI-Large run (r=10: 4,293 s undirected, 6,102 s directed), r=5/20/50 about
+  1.5-2 h, and r=1 several times that -- naively ~7 h undirected and ~11 h
+  directed, near the 16 h limit and unverified, since LI-Large is denser.
+  `scripts/status.py` lists all seven arms with these commands.
+
+  ```bash
+  for arm in hubs5 hubs10 hubs100 res5 res20 res50 res1; do for d in dir undir; do slurm/submit.sh slurm/measures_ibm_$d.slurm LI-Large_$arm --time=16:00:00 --mem=200g; done; done
+  ```
+
+  Then, once the measure files exist, score each sweep in one job (an arm whose
+  measures are not both on disk is skipped, so this can be resubmitted):
+
+  ```bash
+  slurm/submit.sh slurm/distribution_scores.slurm hub_sweep_large --time=16:00:00 --mem=200g
+  slurm/submit.sh slurm/distribution_scores.slurm louvain_sweep_large --time=16:00:00 --mem=200g
+  ```
+
+  Rerun `pattern_splitting.slurm LI-Large` afterwards: the on-disk LI-Large
+  pattern-splitting files predate the hub arms and carry no `hubs<k>` rows.
 - **GraphSAGE `attributes` rerun (no timing features).** The config dropped
   `active_span_days` and `mean_gap_hours` on 2026-10-06 (hindsight: laundering
   accounts are short-lived, so their span is known only after the fact), so every

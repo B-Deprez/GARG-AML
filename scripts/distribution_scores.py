@@ -12,7 +12,7 @@ from src.utils.evaluation import (CUT_OFFS, LEGACY_METRICS, SEED,
                                   evaluate_scores, fold_assignments, folds_path,
                                   metric_names, metric_records, nan_metrics,
                                   read_folds, write_metrics)
-from src.utils.graph_processing import strip_resolution
+from src.utils.graph_processing import parse_hubs, strip_resolution
 from src.utils.naming import gargaml_key
 from src.utils.runtime import resolve_results_dir, select_datasets, write_csv
 from functools import lru_cache
@@ -47,6 +47,31 @@ USE_FOLDS = True
 # out-of-fold numbers anyway.
 LOUVAIN_SWEEP = ["HI-Small_res1", "HI-Small_res5", "HI-Small_res20",
                  "HI-Small_res50", "HI-Small_nolouvain"]
+
+# The hub-removal arms are the other half of the same ablation: Louvain is not
+# run and the k highest-degree accounts are deleted instead. Same treatment as
+# the Louvain arms (the pure score, no model, no folds file), selected with
+# ``GARGAML_DATASET=hub_sweep``. A deleted hub has no score, so it is dropped
+# from the evaluated population (see distribution_scores_IBM) -- the same
+# convention gargaml_tree.py uses for these arms.
+HUB_SWEEP = ["HI-Small_hubs5", "HI-Small_hubs10", "HI-Small_hubs100"]
+
+# The same two sweeps on LI-Large, with the same k and resolutions so a column
+# means one thing across the two datasets (``louvain_sweep_large`` and
+# ``hub_sweep_large``). ``LI-Large_nolouvain`` is deliberately absent: it is
+# expected to be infeasible (slurm/README.md, Known gaps), so there is nothing
+# for a scoring job to read. LI-Large's transactions are parsed once for the
+# whole alias (``ibm_labels`` is cached), so run an alias rather than one job
+# per arm.
+LARGE_LOUVAIN_SWEEP = ["LI-Large_res1", "LI-Large_res5", "LI-Large_res20",
+                       "LI-Large_res50"]
+LARGE_HUB_SWEEP = ["LI-Large_hubs5", "LI-Large_hubs10", "LI-Large_hubs100"]
+
+# Alias -> the arms it expands to; scripts/status.py reads this to know which
+# job scores which arm, so a new alias belongs here and nowhere else.
+SWEEPS = {"louvain_sweep": LOUVAIN_SWEEP, "hub_sweep": HUB_SWEEP,
+          "louvain_sweep_large": LARGE_LOUVAIN_SWEEP,
+          "hub_sweep_large": LARGE_HUB_SWEEP}
 
 # This file's convention for "not available" is -1, not NaN: results are
 # logged as repr()'d Python literals and read back with a bare eval() in
@@ -289,6 +314,21 @@ def ibm_labels(base):
 
 def distribution_scores_IBM(dataset, results_df, str_directed, str_supervised):
     laundering_combined = ibm_labels(strip_resolution(dataset))
+
+    hubs = parse_hubs(dataset)
+    if hubs is not None:
+        # Hub removal deletes accounts from the graph, so they have no score.
+        # The outer merge below would fill them with -1, which is a score the
+        # measure can really take, so they are dropped instead -- as
+        # gargaml_tree.py does for these arms. The evaluated population is
+        # therefore the accounts that remain, k fewer than the full graph.
+        scored = laundering_combined.index.isin(results_df.index)
+        dropped = laundering_combined[~scored]
+        laundering_combined = laundering_combined[scored]
+        print("  hub removal (top "+str(hubs)+"): "+str(len(dropped))
+              +" unscored accounts dropped, "
+              +str(int((dropped["Is Laundering"] > 0).sum()))
+              +" of them with a laundering transaction")
 
     labels_gargaml_full = laundering_combined.merge(results_df[["GARGAML"]], left_index=True, right_index=True, how="outer").fillna(-1)
 
@@ -546,13 +586,27 @@ def benchmark_synthetic(
     print("wrote "+out_path)
 
 if __name__ == "__main__":
-    # GARGAML_DATASET=synthetic runs the 66-dataset synthetic grid instead, and
-    # GARGAML_DATASET=louvain_sweep the Louvain arms (slurm/distribution_scores.slurm
-    # takes either as its argument).
-    selected = select_datasets(["HI-Small", "LI-Large"])  # synthetic, louvain_sweep, HI-Small, LI-Large
+    # GARGAML_DATASET=synthetic runs the 66-dataset synthetic grid instead,
+    # GARGAML_DATASET=louvain_sweep the Louvain arms and hub_sweep the hub-removal
+    # arms, and louvain_sweep_large / hub_sweep_large the same two on LI-Large
+    # (slurm/distribution_scores.slurm takes any of them as its argument).
+    selected = select_datasets(["HI-Small", "LI-Large"])  # synthetic, a SWEEPS alias, HI-Small, LI-Large
     datasets = []
     for name in selected:
-        datasets += LOUVAIN_SWEEP if name == "louvain_sweep" else [name]
+        if name not in SWEEPS:
+            datasets.append(name)
+            continue
+        # An arm is scored only once both directions' measures are on disk, so
+        # an alias submitted while a long arm (LI-Large's r=1) is still running
+        # scores the rest instead of dying on the first missing file. A dataset
+        # named explicitly keeps raising.
+        for arm in SWEEPS[name]:
+            missing = [d for d in ("directed", "undirected")
+                       if not os.path.isfile(RESULTS_DIR+"/"+arm+"_GARGAML_"+d+".csv")]
+            if missing:
+                print("Skipping "+arm+": no "+" or ".join(missing)+" measures in "+RESULTS_DIR)
+            else:
+                datasets.append(arm)
     for dataset in datasets:
         for directed in [True, False]:
             supervised = True

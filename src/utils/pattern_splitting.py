@@ -153,14 +153,19 @@ def analyse(instances, nodes, communities, dataset, resolution):
 
 
 def resolution_sort_key(value):
-    """Sort key putting the no-Louvain control first, then ascending resolution.
+    """Sort key: the no-Louvain control, then the hub arms, then ascending resolution.
 
-    ``resolution`` holds ``"off"`` beside numbers, so the column is object
-    dtype and both ``groupby`` and a plain sort order it as text, which puts
-    10 and 20 before 5. The axis a reader follows is how much the setting
-    reduces the graph.
+    ``resolution`` holds ``"off"`` and ``"hubs<k>"`` beside numbers, so the
+    column is object dtype and both ``groupby`` and a plain sort order it as
+    text, which puts 10 and 20 before 5. The axis a reader follows is how much
+    the setting reduces the graph; the hub arms follow the same order the
+    reporting tables use.
     """
-    return (0, 0.0) if value == "off" else (1, float(value))
+    if value == "off":
+        return (0, 0.0)
+    if str(value).startswith("hubs"):
+        return (1, float(str(value)[len("hubs"):]))
+    return (2, float(value))
 
 
 def summarise(frame):
@@ -177,7 +182,9 @@ def summarise(frame):
         had = group[group["detectable_before"]]
         return pd.Series({
             "attempts": len(group),
-            "pct_split": 100.0 * group["split"].mean(),
+            # astype(float): a hub arm carries NaN here (no communities to be
+            # split across) beside the booleans of the Louvain arms.
+            "pct_split": 100.0 * group["split"].astype(float).mean(),
             "mean_communities": group["n_communities"].mean(),
             "mean_edge_survival": 100.0 * group["edge_survival"].mean(),
             "attempts_with_2path": len(had),
