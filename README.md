@@ -4,6 +4,25 @@
 
 This is the source code for an experiment to detect smurfing patterns in transaction networks. It provides an implementation of GARG-AML, which constructs a score based on the adjancy matrix of the second-order neighbourhood. 
 
+## Citing
+Please cite our paper and/or code as follows:
+*Use the BibTeX citation*
+
+```tex
+
+@article{deprez2025gargamlsmurfingscalableinterpretable,
+      title={GARG-AML against Smurfing: A Scalable and Interpretable Graph-Based Framework for Anti-Money Laundering}, 
+      author={Bruno Deprez and Bart Baesens and Tim Verdonck and Wouter Verbeke},
+      year={2025},
+      journal={arXiv preprint arXiv:2506.04292},
+      eprint={2506.04292},
+      archivePrefix={arXiv},
+      primaryClass={cs.SI},
+      url={https://arxiv.org/abs/2506.04292}, 
+}
+
+```
+
 ## Methodology
 GARG-AML is based on insights derived from the definition of a pure smurfing pattern. With smurfing, multiple intermediate money mules (or smurfs) are used to get a large amount of money from one account to another, often using many small transactions. A representation of this is given in the figure below. 
 
@@ -296,25 +315,6 @@ to install. To check or strip files directly:
 
 ```bash
 python scripts/nbstrip.py --check notebooks/
-```
-
-## Citing
-Please cite our paper and/or code as follows:
-*Use the BibTeX citation*
-
-```tex
-
-@article{deprez2025gargamlsmurfingscalableinterpretable,
-      title={GARG-AML against Smurfing: A Scalable and Interpretable Graph-Based Framework for Anti-Money Laundering}, 
-      author={Bruno Deprez and Bart Baesens and Tim Verdonck and Wouter Verbeke},
-      year={2025},
-      journal={arXiv preprint arXiv:2506.04292},
-      eprint={2506.04292},
-      archivePrefix={arXiv},
-      primaryClass={cs.SI},
-      url={https://arxiv.org/abs/2506.04292}, 
-}
-
 ```
 
 ## References
