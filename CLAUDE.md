@@ -133,7 +133,29 @@ them already have work on disk:
   (`fold = NaN`) of `HI-Small`'s base file, not the fold mean, or the columns mix two
   kinds of number. `scripts/status.py` treats these arms as score-only, so it shows no
   tree or fold-partition work outstanding for them; the hub arms (`_hubs<k>`) keep
-  their tree plan. The split-pattern diagnostic is done
+  their tree plan. **The hub arms now have the pure score too** (2026-10-11,
+  `GARGAML_DATASET=hub_sweep`, `HUB_SWEEP` in `distribution_scores.py`), and
+  `scripts/pattern_splitting.py` runs them (`hubs<k>` rows; `split` is NaN, there
+  are no communities). The deleted hubs have no score and are dropped from the
+  evaluated population, as `gargaml_tree.py` does — **not** left at the outer
+  merge's `-1`, which is a real score value. Measured: the removed hubs are
+  laundering-heavy (5 of the top 5, 10 of the top 10 and 22 of the top 100 carry a
+  laundering transaction); hub removal destroys no two-hop attempt (0 %, against
+  11.5 % for Louvain r=10); and scoring the published arm on a hub arm's
+  population moves its AUC-ROC by at most 0.001 (checked ad hoc), so the
+  hub-vs-published gap is not a population effect — undirected mean AUC-ROC
+  0.593-0.602 against 0.623 at r=10 and 0.591 without Louvain, directed
+  unchanged. **The same two sweeps are defined for LI-Large** (2026-10-12,
+  `GARGAML_DATASET=louvain_sweep_large` / `hub_sweep_large`; `LARGE_LOUVAIN_SWEEP`
+  / `LARGE_HUB_SWEEP`, same *k* and resolutions, no `LI-Large_nolouvain`). The
+  aliases live in `SWEEPS` in `distribution_scores.py`, the one place that maps an
+  alias to its arms, and **`status.py` reads that mapping**: every arm in it is
+  score-only there (measures + base score), the LI-Large ones outside the tree
+  list and so submitted by name rather than `--array`, and the HI-Small hub arms'
+  base scores are now expected too (all done). An alias skips an arm whose two
+  measure files are not both on disk. Nothing has been run on LI-Large yet; the
+  costs in `slurm/README.md` are extrapolated from HI-Small, and the on-disk
+  `LI-Large_pattern_splitting*.csv` predate the hub arms. The split-pattern diagnostic is done
   (`scripts/pattern_splitting.py`); `notebooks/LouvainEdgeSeverance.ipynb` still
   reports % edges severed only at `resolution = 10`. **Caveat for the directed-vs-undirected
   reading:** `community_map` runs Louvain on `G.to_undirected()` for a directed graph, so

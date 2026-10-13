@@ -17,6 +17,19 @@
 #              # score, directed beside undirected, full-population metrics, no model and
 #              # no folds file. The published setting (plain HI-Small) is the sweep's own
 #              # point and is not rerun. The transactions file is parsed once for all five.
+#            slurm/submit.sh slurm/distribution_scores.slurm hub_sweep
+#              # the hub-removal arms HI-Small_hubs{5,10,100}, same treatment. The k deleted
+#              # hubs have no score and are dropped from the evaluated population (as
+#              # gargaml_tree.py does); the log says how many and how many carried a
+#              # laundering transaction.
+#            slurm/submit.sh slurm/distribution_scores.slurm louvain_sweep_large --time=16:00:00 --mem=200g
+#            slurm/submit.sh slurm/distribution_scores.slurm hub_sweep_large     --time=16:00:00 --mem=200g
+#              # the same two sweeps on LI-Large (LI-Large_res{1,5,20,50} and
+#              # LI-Large_hubs{5,10,100}, the same k as HI-Small). LI-Large_nolouvain is not
+#              # in them: expected infeasible. An arm whose two measure files are not both on
+#              # disk is skipped with a log line, so an alias can be submitted while a long
+#              # arm (r=1) is still running and resubmitted for it later. The LI-Large
+#              # transactions are parsed once per job, so run an alias, not one job per arm.
 # ARRAY    None -- one job loops both directions over what it selected.
 # PREREQ   Stage-1 measures, and <dataset>_folds.csv if you want the per-fold
 #          rows (a missing folds file is a normal state, not an error).

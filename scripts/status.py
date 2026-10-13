@@ -79,8 +79,9 @@ from src.utils.runtime import resolve_results_dir
 DIRECTIONS = ["undirected", "directed"]
 
 # Datasets that carry the whole experiment set (base scores, GraphSAGE, label
-# tables, pattern splitting, FlowScope). The Louvain sweep, hub removal and the
-# bank views get measures and trees only.
+# tables, pattern splitting, FlowScope). The Louvain sweep and hub removal arms
+# are score-only (measures and base scores, see ``Plan.sweeps``); the bank views
+# and the HI-Small hub arms also keep a tree plan.
 CORE_DATASETS = ["HI-Small", "LI-Large"]
 
 # gargaml_IF.py hardcodes its dataset in main().
@@ -89,10 +90,6 @@ IF_DATASET = "HI-Small"
 # Expected to be infeasible (slurm/README.md, Known gaps): reported, but never
 # counted against the run.
 OPTIONAL_DATASETS = {"LI-Large_nolouvain"}
-
-# The one `slurm/distribution_scores.slurm` argument that runs every score-only
-# arm in a single job (scripts/distribution_scores.py, LOUVAIN_SWEEP).
-SWEEP_JOB = "louvain_sweep"
 
 # Stage 1 cost per synthetic size tier, from slurm/README.md's submission order.
 SYNTH_COST = {100: ("00:30:00", "8g"), 10000: ("02:00:00", "16g"),
@@ -164,20 +161,29 @@ class Plan:
     graphsage_suffix: dict
     institutions: list
     view_base: str
+    sweeps: dict          # `distribution_scores.slurm` alias -> the score-only arms its job runs
+    extra_arms: list      # sweep arms outside ``ibm`` (the LI-Large ones): measures and base score only
 
 
 def load_plan():
+    ibm = script_constant("gargaml_tree.py", "DATASETS")
+    arm_lists = {name: script_constant("distribution_scores.py", name)
+                 for name in ("LOUVAIN_SWEEP", "HUB_SWEEP", "LARGE_LOUVAIN_SWEEP", "LARGE_HUB_SWEEP")}
+    sweeps = script_constant("distribution_scores.py", "SWEEPS", arm_lists)
+    extra_arms = list(dict.fromkeys(arm for arms in sweeps.values() for arm in arms if arm not in ibm))
     targets = script_constant("gargaml_tree.py", "TARGET_COLUMNS")
     names = {"CUT_OFFS": CUT_OFFS, "HEADLINE_CUTOFFS": HEADLINE_CUTOFFS,
              "TARGET_COLUMNS": script_constant("graphsage_baseline.py", "TARGET_COLUMNS")}
     return Plan(
-        ibm=script_constant("gargaml_tree.py", "DATASETS"),
+        ibm=ibm,
         targets=targets,
         synth=script_function("gargaml_directed_synth.py", "construct_datasets")(),
         graphsage=script_constant("graphsage_baseline.py", "DATASETS", names),
         graphsage_suffix=script_constant("graphsage_baseline.py", "CONFIG_SUFFIXES"),
         institutions=script_constant("partial_observability.py", "INSTITUTIONS"),
         view_base=script_constant("partial_observability.py", "DATASET"),
+        sweeps=sweeps,
+        extra_arms=extra_arms,
     )
 
 
@@ -421,8 +427,12 @@ def measure_defect(path):
 
 
 def add_measures(r):
-    """Stage 1: ``<dataset>_GARGAML_<direction>.csv`` for every IBM dataset name."""
-    for i, dataset in enumerate(r.plan.ibm):
+    """Stage 1: ``<dataset>_GARGAML_<direction>.csv`` for every IBM dataset name.
+
+    The sweep arms outside the tree list have no array index to submit by, so
+    their command names the dataset instead -- the Slurm jobs accept any tag.
+    """
+    for i, dataset in list(enumerate(r.plan.ibm))+[(None, arm) for arm in r.plan.extra_arms]:
         for direction in DIRECTIONS:
             name = dataset+"_GARGAML_"+direction+".csv"
             col = "meas-D" if direction == "directed" else "meas-U"
@@ -438,14 +448,14 @@ def add_measures(r):
                         if defect:
                             status, detail = "STALE", defect+"; rerun with GARGAML_FORCE=1"
             cmd = ("slurm/submit.sh slurm/measures_ibm_"+("dir" if direction == "directed" else "undir")
-                   +".slurm "+dataset+" --array="+str(i)+big(dataset))
+                   +".slurm "+dataset+("" if i is None else " --array="+str(i))+big(dataset))
             if status == "STALE":
                 cmd = "GARGAML_FORCE=1 "+cmd
             r.add(Unit(key="meas:"+dataset+":"+direction, label="measures "+direction+" "+dataset,
                        group="ibm", status=status, detail=detail, note=note, cmd=cmd,
                        optional=dataset in OPTIONAL_DATASETS, cols={col: CELL[status]},
                        family="measures_ibm_"+("dir" if direction == "directed" else "undir"),
-                       dataset=dataset, indices=frozenset([i])))
+                       dataset=dataset, indices=frozenset() if i is None else frozenset([i])))
 
 
 def add_folds(r):
@@ -512,11 +522,13 @@ def add_tree(r):
 def add_base_scores(r):
     """The base GARG-AML score through the shared metrics, per direction.
 
-    The core datasets are scored per fold and pooled. A Louvain-sweep arm has
-    no fold partition and fits nothing, so it gets full-population metrics
-    only, and one job runs all of them (``SWEEP_JOB``).
+    The core datasets are scored per fold and pooled. A sweep arm (Louvain
+    resolution or hub removal) has no fold partition and fits nothing, so it
+    gets full-population metrics only, and one job -- its ``distribution_scores``
+    alias -- runs every arm of that sweep on that dataset.
     """
-    arms = [d for d in r.plan.ibm if is_score_only(d) and d not in OPTIONAL_DATASETS]
+    alias_of = {arm: alias for alias, arms in r.plan.sweeps.items() for arm in arms}
+    arms = [arm for arm in alias_of if arm not in OPTIONAL_DATASETS]
     for dataset in CORE_DATASETS + arms:
         core = dataset in CORE_DATASETS
         statuses, problems, notes, cols = [], [], [], {}
@@ -534,9 +546,10 @@ def add_base_scores(r):
                    status=combine(statuses), detail="; ".join(problems) if combine(statuses) != "DONE" else "",
                    note="\n".join(notes), needs=needs+(("folds:"+dataset,) if core else ()),
                    taints={"base-D": ("meas:"+dataset+":directed",)},
-                   cmd=("slurm/submit.sh slurm/distribution_scores.slurm "+(dataset+big(dataset) if core else SWEEP_JOB)),
+                   cmd=("slurm/submit.sh slurm/distribution_scores.slurm "
+                        +(dataset if core else alias_of[dataset])+big(dataset)),
                    cols=cols, family="distribution_scores", dataset=dataset,
-                   groups=() if core else (SWEEP_JOB,)))
+                   groups=() if core else (alias_of[dataset],)))
 
 
 def add_isolation_forest(r):
@@ -962,7 +975,8 @@ def matrix_rows(r):
             for col, text in u.cols.items():
                 cells[(u.dataset, col)] = text
     return [[dataset+(" (opt)" if dataset in OPTIONAL_DATASETS else "")]
-            + [cells.get((dataset, col), "-") for col in MATRIX] for dataset in r.plan.ibm]
+            + [cells.get((dataset, col), "-") for col in MATRIX]
+            for dataset in r.plan.ibm+r.plan.extra_arms]
 
 
 NEXT_STEPS = [("RUNNING", "Running now"), ("QUEUED", "Pending in the queue"),
